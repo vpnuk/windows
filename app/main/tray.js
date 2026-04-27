@@ -4,8 +4,8 @@ const path = require('path');
 
 const _icons = { // connectionStates
     'disconnected': 'icon_gray.png',
-    'connecting': 'icon_sepia.png',
-    'connected': 'icon.png'
+    'connecting':   'icon_sepia.png',
+    'connected':    'icon_connected.png'
 };
 
 const iconPaths = Object.assign({}, ...Object.keys(connectionStates).map(key => ({
