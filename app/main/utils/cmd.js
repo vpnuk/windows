@@ -1,0 +1,1 @@
+exports.escapeSpaces = value => value.replace(' ', '\"\ \"');
