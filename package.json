@@ -95,6 +95,7 @@
     "extends": null
   },
   "dependencies": {
+    "adm-zip": "^0.5.5",
     "axios": "^0.21.1",
     "electron-store": "^7",
     "electron-updater": "^4.3.9",
