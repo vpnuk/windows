@@ -64,30 +64,37 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: yarn run electron-builder --win --publish=never
 
-      - name: Prepare release artifacts
-        id: prep
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          Get-ChildItem .\release\ -Recurse
-          $files = [System.Collections.Generic.List[string]]::new()
-          foreach ($exe in (Get-ChildItem .\release\*.exe)) {
-            $slug = $exe.Name -replace ' ', '-'
-            Rename-Item $exe.FullName $slug -ErrorAction SilentlyContinue
-            $files.Add("release/$slug")
-          }
-          if (Test-Path "release\latest.yml") { $files.Add("release/latest.yml") }
-          $fileList = $files -join ","
-          echo "FILES=$fileList" >> $env:GITHUB_OUTPUT
-          echo "VERSION=1.3.0" >> $env:GITHUB_OUTPUT
+          Write-Host "=== release folder ==="
+          Get-ChildItem .\release\*.exe, .\release\*.yml -ErrorAction SilentlyContinue
 
-      - name: Create draft release
-        uses: ncipollo/release-action@v1
-        with:
-          allowUpdates: true
-          removeArtifacts: true
-          draft: true
-          omitBody: true
-          tag: "v${{ steps.prep.outputs.VERSION }}"
-          name: "VPNUK ${{ steps.prep.outputs.VERSION }}"
-          artifacts: "${{ steps.prep.outputs.FILES }}"
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Rename exe (spaces -> hyphens)
+          $exes = Get-ChildItem .\release\*.exe
+          foreach ($exe in $exes) {
+            $slug = $exe.Name -replace ' ', '-'
+            if ($exe.Name -ne $slug) {
+              Rename-Item $exe.FullName $slug
+            }
+          }
+
+          # Delete existing release + tag if present (ignore errors)
+          gh release delete v1.3.0 --yes 2>$null; $true
+          git tag -d v1.3.0 2>$null; $true
+
+          # Build file list
+          $artifacts = @()
+          foreach ($exe in (Get-ChildItem .\release\*.exe)) { $artifacts += $exe.FullName }
+          if (Test-Path ".\release\latest.yml") { $artifacts += ".\release\latest.yml" }
+
+          Write-Host "=== uploading ==="
+          $artifacts | ForEach-Object { Write-Host $_ }
+
+          gh release create v1.3.0 `
+            --title "VPNUK 1.3.0" `
+            --draft `
+            --notes "" `
+            @artifacts
