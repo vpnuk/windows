@@ -69,13 +69,14 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem .\release\ -Recurse
-          $exes = Get-ChildItem .\release\*.exe
-          $files = $exes | ForEach-Object {
-            $slug = $_.Name -replace ' ', '-'
-            Rename-Item $_.FullName $slug -ErrorAction SilentlyContinue
-            "release/$slug"
+          $files = [System.Collections.Generic.List[string]]::new()
+          foreach ($exe in (Get-ChildItem .\release\*.exe)) {
+            $slug = $exe.Name -replace ' ', '-'
+            Rename-Item $exe.FullName $slug -ErrorAction SilentlyContinue
+            $files.Add("release/$slug")
           }
-          $fileList = ($files + "release/latest.yml") -join ","
+          if (Test-Path "release\latest.yml") { $files.Add("release/latest.yml") }
+          $fileList = $files -join ","
           echo "FILES=$fileList" >> $env:GITHUB_OUTPUT
           echo "VERSION=1.3.0" >> $env:GITHUB_OUTPUT
 
