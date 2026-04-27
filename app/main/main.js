@@ -13,8 +13,10 @@ let window, tray;
 
 function createWindow() {
     window = new BrowserWindow({
-        width: isDev ? 1280 : 720,
-        height: 960,
+        width: isDev ? 1280 : 580,
+        height: isDev ? 960 : 720,
+        minWidth: 580,
+        minHeight: 600,
         icon: path.join(__dirname, '../../public/favicon.ico'),
         webPreferences: {
             webSecurity: false,
