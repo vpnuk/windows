@@ -303,6 +303,10 @@ send:
                     MessageBox MB_OK "Error installing WireGuard:$\n$0"
                     Abort
                 ${EndIf}
+                ; Close WireGuard UI if it auto-launched after silent install
+                nsExec::ExecToStack 'taskkill /F /IM wireguard.exe'
+                Pop $0
+                Pop $0
             ${Else}
                 MessageBox MB_OK "Error downloading WireGuard:$\n$1"
                 Abort
