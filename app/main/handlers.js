@@ -64,7 +64,7 @@ const closeConnection = async (beforeDisconnectCb = () => { }) => {
     }
     if (dialog.showMessageBoxSync({
         type: 'warning',
-        icon: path.join(__dirname, '../assets/icon.ico'),
+        icon: path.join(__dirname, '../assets/icon.png'),
         title: 'VPNUK',
         message: 'VPN is active. Disconnect and exit?',
         buttons: ['Disconnect & Exit', 'Cancel'],
@@ -166,7 +166,7 @@ ipcMain.on('ipv6-fix', async (event) => {
 ipcMain.on('ovpn-update-request', async (event, arg) => {
     if (dialog.showMessageBoxSync({
         type: 'question',
-        icon: path.join(__dirname, '../assets/icon.ico'),
+        icon: path.join(__dirname, '../assets/icon.png'),
         title: 'VPNUK Update',
         message: `OpenVPN ${arg.version} update available.\nInstall now?`,
         buttons: ['Install', 'Later'],
@@ -181,7 +181,7 @@ ipcMain.on('ovpn-update-install', (event, arg) => {
     if (installOvpnUpdate(arg.file) === 0) {
         dialog.showMessageBoxSync({
             type: 'info',
-            icon: path.join(__dirname, '../assets/icon.ico'),
+            icon: path.join(__dirname, '../assets/icon.png'),
             title: 'VPNUK Update',
             message: 'OpenVPN updated successfully.',
             buttons: ['OK']
@@ -207,7 +207,7 @@ ipcMain.on('wg-update-request', async (event, arg) => {
     if (checkWireGuardInstalled()) return;
     if (dialog.showMessageBoxSync({
         type: 'question',
-        icon: path.join(__dirname, '../assets/icon.ico'),
+        icon: path.join(__dirname, '../assets/icon.png'),
         title: 'VPNUK — WireGuard',
         message: 'WireGuard is not installed.\nInstall it now to use WireGuard connections?',
         buttons: ['Install WireGuard', 'Skip'],
