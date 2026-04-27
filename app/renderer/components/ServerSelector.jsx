@@ -2,29 +2,31 @@ import React, { useEffect } from 'react';
 import { action, runInAction } from 'mobx';
 import { observer } from 'mobx-react-lite';
 import { Radio } from 'antd';
+import ReactCountryFlag from 'react-country-flag';
 import '@components/index.css';
 import { ValueSelector } from '@components';
 import { Servers, useStore } from '@domain';
 
-const countryCodeToEmoji = code => {
-    const normalized = code === 'UK' ? 'GB' : code;
-    return [...normalized.toUpperCase()]
-        .map(c => String.fromCodePoint(c.charCodeAt(0) + 0x1F1A5))
-        .join('');
-};
+const toIso = code => (code === 'UK' ? 'GB' : (code || '').toUpperCase());
 
 const formatServerOption = option => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 20, lineHeight: 1 }}>
-            {option.countryCode ? countryCodeToEmoji(option.countryCode) : ''}
-        </span>
-        <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
-            <span style={{ fontWeight: 600, fontSize: 13 }}>
-                {option.city || option.label}
-            </span>
-            <span style={{ fontSize: 11, opacity: 0.65 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {option.countryCode && (
+            <ReactCountryFlag
+                countryCode={toIso(option.countryCode)}
+                svg
+                style={{ width: 24, height: 18, flexShrink: 0 }}
+            />
+        )}
+        <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+            <span style={{ fontWeight: 700, fontSize: 13 }}>
                 {option.label}
             </span>
+            {option.city && (
+                <span style={{ fontSize: 11, opacity: 0.60 }}>
+                    {option.city}
+                </span>
+            )}
         </span>
     </div>
 );
