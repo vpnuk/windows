@@ -1,0 +1,100 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Rajdhani:wght@600;700;800&display=swap');
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: #090d15;
+    color: #d6e4f7;
+}
+
+.App {
+    text-align: center;
+    height: 100%;
+}
+.App-logo {
+    animation: App-logo-spin infinite 20s linear;
+    height: 40vmin;
+    pointer-events: none;
+}
+.App-header {
+    background-color: #282c34;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: calc(10px + 2vmin);
+    color: white;
+}
+.App-link {
+    color: #61dafb;
+}
+.ant-layout {
+    height: 100%;
+}
+@keyframes App-logo-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.hidden {
+    display: none;
+}
+
+
+.form-select {
+    display: flex;
+    justify-content: flex-end;
+    margin: 10px 0;
+}
+.form-select > div:first-of-type {
+    background: rgba(196, 196, 196, 0.09);
+    border-radius: 45px;
+    border: 1px solid transparent;
+    min-height: 44px;
+    width: 100%;
+    transition: border-color 0.2s;
+}
+.form-select > div:first-of-type:hover { border-color: #237be7; }
+.form-select > div:nth-child(3) {
+    width: 100%;
+    background-color: #0d1422;
+    border: 1px solid #1e2d4a;
+    border-radius: 12px;
+    color: #d6e4f7;
+    z-index: 1000;
+}
+.form-select > div:first-of-type > div:first-of-type { padding-left: 18px; }
+.form-select > div div div { color: #d6e4f7; }
+
+.ant-progress-circle-trail {
+    stroke: rgba(0, 0, 0, 0.25) !important;
+}
+.ant-progress-inner {
+    background-color: rgba(0, 0, 0, 0.25) !important;
+    border: 3px solid rgba(255, 255, 255, 0.25);
+}
+.ant-progress-text {
+    font-style: normal;
+    font-weight: normal;
+    color: #ffffff !important;
+    font-size: 2em !important;
+    line-height: 2 !important;
+    margin-left: 0 !important;
+}
+
+.ReactModal__Overlay {
+    opacity: 0;
+    transition: opacity 200ms ease-in;
+}
+.ReactModal__Overlay--after-open{
+    opacity: 1;
+}
+.ReactModal__Overlay--before-close{
+    opacity: 0;
+}
