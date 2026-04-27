@@ -83,6 +83,7 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           allowUpdates: true
+          removeArtifacts: true
           draft: true
           omitBody: true
           tag: "v${{ steps.prep.outputs.VERSION }}"
