@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+      "paths": {
+        "@assets/*": ["./app/assets/*"],
+        "@modules/*": ["./app/modules/*"],
+        "@app": ["./app/renderer/app"],
+        "@styles": ["./app/renderer/styles"],
+        "@components": ["./app/renderer/components/index"],
+        "@domain": ["./app/renderer/domain/index"]
+      },
+      "jsx": "react"
+    }
+  }
