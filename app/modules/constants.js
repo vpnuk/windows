@@ -52,11 +52,11 @@ exports.phoneBookPath = path.resolve(
 );
 
 const VpnType = {
+    WireGuard: { label: 'WireGuard' },
     OpenVPN:   { label: 'OpenVPN' },
     IKEv2:     { label: 'IKEv2' },
     L2TP:      { label: 'L2TP' },
     PPTP:      { label: 'PPTP' },
-    WireGuard: { label: 'WireGuard' },
 };
 exports.VpnType = VpnType;
 
