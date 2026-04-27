@@ -12,6 +12,9 @@ const ValueSelector = ({ options, onChange, defaultValue = undefined, value = un
         defaultValue={defaultValue}
         getOptionLabel={option => option.label}
         formatOptionLabel={formatOptionLabel}
-        onChange={value => onChange(value)} />;
+        onChange={value => onChange(value)}
+        menuPortalTarget={document.body}
+        menuPosition="fixed"
+        menuPlacement="auto" />;
 
 export default observer(ValueSelector);
