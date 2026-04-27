@@ -43,7 +43,7 @@
     "win": {
       "target": [
         {
-          "target": "nsis-web",
+          "target": "nsis",
           "arch": [
             "x64",
             "ia32",
@@ -58,7 +58,7 @@
       ],
       "publisherName": "Online Privacy Services Ltd"
     },
-    "nsisWeb": {
+    "nsis": {
       "oneClick": false,
       "perMachine": true,
       "allowElevation": true,
@@ -66,8 +66,7 @@
       "installerHeader": "nsis/installerHeader.bmp",
       "installerSidebar": "nsis/installerSidebar.bmp",
       "runAfterFinish": true,
-      "include": "nsis/extension.nsh",
-      "differentialPackage": true
+      "include": "nsis/extension.nsh"
     },
     "directories": {
       "buildResources": "build",
