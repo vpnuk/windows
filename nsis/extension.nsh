@@ -1,6 +1,6 @@
 !include MUI2.nsh
 !macro customWelcomePage
-	!insertMacro MUI_PAGE_WELCOME
+!insertMacro MUI_PAGE_WELCOME
 !macroEnd
 
 ; ---------------------------------- COMMON -----------------------------------
@@ -41,6 +41,17 @@ send:
 !macroend
 !define uninstallOvpn "!insertmacro uninstallOvpn"
 
+!macro uninstallWg
+    ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\WireGuard" "UninstallString"
+    ${If} $0 != ""
+        nsExec::ExecToStack '"$0" /S'
+        Pop $0
+        Pop $0
+        Sleep 3000
+    ${EndIf}
+!macroend
+!define uninstallWg "!insertmacro uninstallWg"
+
 !macro radioBtnClick
     Pop $hwnd
     nsDialogs::GetUserData $hwnd
@@ -65,6 +76,10 @@ send:
     LangString subtitle 1033 "OpenVPN installation"
     Page custom ovpnPageCreate ovpnPageLeave
 
+    LangString wgTitle 1033 "WireGuard"
+    LangString wgSubtitle 1033 "WireGuard installation"
+    Page custom wgPageCreate wgPageLeave
+
     Var ovpnVersion
     Var ovpnPath
     Var installedOvpnVer
@@ -73,6 +88,16 @@ send:
     Var hwnd
     Var radioValue
     Var height
+
+    Var wgVersion
+    Var wgInstallerUrl
+    Var wgPath
+    Var installedWgVer
+    Var wgDialog
+    Var wgHwnd
+    Var wgRadioValue
+    Var wgHeight
+
     Function ovpnPageCreate
         StrCpy $height 12
         !insertmacro MUI_HEADER_TEXT $(title) $(subtitle)
@@ -150,6 +175,12 @@ send:
 
             nsJSON::Get "openvpn" "original" $1 /end
             Pop $ovpnInstallerUrl
+
+            nsJSON::Get "windows" "wireguard" "version" /end
+            Pop $wgVersion
+
+            nsJSON::Get "windows" "wireguard" "installer" /end
+            Pop $wgInstallerUrl
         ${Else}
             MessageBox MB_OK "Error loading versions.json:$\n$0"
         ${EndIf}
@@ -191,6 +222,97 @@ send:
             EnableWindow $0 1
         ${EndIf}
     FunctionEnd
+
+    ; =================== WireGuard functions ===================
+
+    Function wgPageCreate
+        StrCpy $wgHeight 12
+        !insertmacro MUI_HEADER_TEXT $(wgTitle) $(wgSubtitle)
+        nsDialogs::Create 1018
+        Pop $wgDialog
+        ${If} $wgDialog == error
+            Abort
+        ${EndIf}
+
+        StrCpy $wgPath ""
+        IfFileExists "$PROGRAMFILES\WireGuard\wireguard.exe" 0 wg_check64
+        StrCpy $wgPath "$PROGRAMFILES\WireGuard\wireguard.exe"
+        Goto wg_version_check
+    wg_check64:
+        IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" 0 wg_no_install
+        StrCpy $wgPath "$PROGRAMFILES64\WireGuard\wireguard.exe"
+    wg_version_check:
+        ReadRegStr $installedWgVer HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\WireGuard" "DisplayVersion"
+        ${If} $installedWgVer == ""
+            StrCpy $installedWgVer "unknown"
+        ${EndIf}
+    wg_no_install:
+
+        ${NSD_CreateLabel} 0u 0u 100% 12u "Select WireGuard to use:"
+        Pop $wgHwnd
+
+        StrCmp $wgPath "" +2 0
+        StrCmp $wgVersion $installedWgVer wg_install_end 0
+        ${NSD_CreateRadioButton} 12u "$wgHeight\u" 100% 12u "Install WireGuard $wgVersion"
+        Pop $wgHwnd
+        nsDialogs::SetUserData $wgHwnd "true"
+        ${NSD_OnClick} $wgHwnd wgRadioBtnClick
+        IntOp $wgHeight $wgHeight + 12
+        StrCpy $wgRadioValue "true"
+    wg_install_end:
+
+        StrCmp $wgPath "" wg_use_end 0
+        ${NSD_CreateRadioButton} 12u "$wgHeight\u" 100% 12u "Use installed WireGuard $installedWgVer"
+        Pop $wgHwnd
+        nsDialogs::SetUserData $wgHwnd "false"
+        ${NSD_OnClick} $wgHwnd wgRadioBtnClick
+        StrCpy $wgRadioValue "false"
+    wg_use_end:
+
+        ${NSD_Check} $wgHwnd
+        nsDialogs::Show
+    FunctionEnd
+
+    Function wgRadioBtnClick
+        Pop $wgHwnd
+        nsDialogs::GetUserData $wgHwnd
+        Pop $wgRadioValue
+    FunctionEnd
+
+    Function wgPageLeave
+        ${If} $wgRadioValue == ""
+            MessageBox MB_OK "Please specify your choice"
+            Abort
+        ${ElseIf} $wgRadioValue == true
+            GetDlgItem $0 $hWndParent 1
+            EnableWindow $0 0
+
+            ${If} $wgPath != ""
+                ${uninstallWg}
+            ${EndIf}
+
+            ${ClearStack}
+            inetc::get /NOCANCEL "$wgInstallerUrl" "$TEMP\wgInstaller.exe" /END
+            Pop $1
+
+            ${If} $1 == "OK"
+                nsExec::ExecToStack '"$TEMP\wgInstaller.exe" /S'
+                Pop $0
+                ${If} $0 != 0
+                    Pop $0
+                    MessageBox MB_OK "Error installing WireGuard:$\n$0"
+                    Abort
+                ${EndIf}
+            ${Else}
+                MessageBox MB_OK "Error downloading WireGuard:$\n$1"
+                Abort
+            ${EndIf}
+
+            GetDlgItem $0 $hWndParent 1
+            EnableWindow $0 1
+        ${EndIf}
+    FunctionEnd
+
     !pragma warning enable 6040 ; Enable back
 !macroend
 
@@ -274,11 +396,14 @@ FunctionEnd
     Var ovpnDialog
     Var hwnd
     Var ovpnFlag
+    Var wgFlag
     Var userDataFlag
 
     Function un.OvpnPageCreate
         ReadRegStr $0 HKLM SOFTWARE\OpenVPN exe_path
+        ReadRegStr $1 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\WireGuard" "UninstallString"
         ${If} $0 == ""
+        ${AndIf} $1 == ""
             Abort
         ${EndIf}
 
@@ -290,34 +415,56 @@ FunctionEnd
         ${EndIf}
 
     ; -------------- OpenVPN --------------
-        ${NSD_CreateLabel} 0u 0u 100% 12u "Uninstall OpenVPN"
-        Pop $hwnd
+        ${If} $0 != ""
+            ${NSD_CreateLabel} 0u 0u 100% 12u "Uninstall OpenVPN"
+            Pop $hwnd
 
-        ${NSD_CreateRadioButton} 12u 12u 100% 12u "Yes"
-        pop $hwnd
-        nsDialogs::SetUserData $hwnd "true"
-        ${NSD_OnClick} $hwnd un.ovpnRadioClick
-        ${NSD_AddStyle} $hwnd ${WS_GROUP}
+            ${NSD_CreateRadioButton} 12u 12u 100% 12u "Yes"
+            pop $hwnd
+            nsDialogs::SetUserData $hwnd "true"
+            ${NSD_OnClick} $hwnd un.ovpnRadioClick
+            ${NSD_AddStyle} $hwnd ${WS_GROUP}
 
-        ${NSD_CreateRadioButton} 12u 24u 100% 12u "No"
-        pop $hwnd
-        nsDialogs::SetUserData $hwnd "false"
-        ${NSD_OnClick} $hwnd un.ovpnRadioClick
+            ${NSD_CreateRadioButton} 12u 24u 100% 12u "No"
+            pop $hwnd
+            nsDialogs::SetUserData $hwnd "false"
+            ${NSD_OnClick} $hwnd un.ovpnRadioClick
 
-        ${NSD_Check} $hwnd
-        StrCpy $ovpnFlag "false"
-    
+            ${NSD_Check} $hwnd
+            StrCpy $ovpnFlag "false"
+        ${EndIf}
+
+    ; -------------- WireGuard --------------
+        ${If} $1 != ""
+            ${NSD_CreateLabel} 0u 36u 100% 12u "Uninstall WireGuard"
+            Pop $hwnd
+
+            ${NSD_CreateRadioButton} 12u 48u 100% 12u "Yes"
+            pop $hwnd
+            nsDialogs::SetUserData $hwnd "true"
+            ${NSD_OnClick} $hwnd un.wgRadioClick
+            ${NSD_AddStyle} $hwnd ${WS_GROUP}
+
+            ${NSD_CreateRadioButton} 12u 60u 100% 12u "No"
+            pop $hwnd
+            nsDialogs::SetUserData $hwnd "false"
+            ${NSD_OnClick} $hwnd un.wgRadioClick
+
+            ${NSD_Check} $hwnd
+            StrCpy $wgFlag "false"
+        ${EndIf}
+
     ; ------------- User data -------------
-        ${NSD_CreateLabel} 0u 36u 100% 12u "Clear application user data"
+        ${NSD_CreateLabel} 0u 72u 100% 12u "Clear application user data"
         Pop $hwnd
 
-        ${NSD_CreateRadioButton} 12u 48u 100% 12u "Yes"
+        ${NSD_CreateRadioButton} 12u 84u 100% 12u "Yes"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "true"
         ${NSD_OnClick} $hwnd un.dataRadioClick
         ${NSD_AddStyle} $hwnd ${WS_GROUP}
 
-        ${NSD_CreateRadioButton} 12u 60u 100% 12u "No"
+        ${NSD_CreateRadioButton} 12u 96u 100% 12u "No"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "false"
         ${NSD_OnClick} $hwnd un.dataRadioClick
@@ -332,6 +479,11 @@ FunctionEnd
     Function un.ovpnRadioClick
         ${radioBtnClick}
         Pop $ovpnFlag
+    FunctionEnd
+
+    Function un.wgRadioClick
+        ${radioBtnClick}
+        Pop $wgFlag
     FunctionEnd
 
     Function un.dataRadioClick
@@ -357,6 +509,11 @@ FunctionEnd
         ; -------------- OpenVPN --------------
         ${If} $ovpnFlag == true
             ${uninstallOvpn}
+        ${EndIf}
+
+        ; ------------- WireGuard -------------
+        ${If} $wgFlag == true
+            ${uninstallWg}
         ${EndIf}
         
         ; ------------- User data -------------
