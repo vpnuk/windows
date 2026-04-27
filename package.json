@@ -51,7 +51,7 @@
           ]
         }
       ],
-      "icon": "app/assets/icon.ico",
+      "icon": "app/assets/icon.png",
       "requestedExecutionLevel": "requireAdministrator",
       "publish": [
         "github"
