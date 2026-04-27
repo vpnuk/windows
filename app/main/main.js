@@ -61,14 +61,22 @@ function createWindow() {
         isDev && console.log('window-close event', window.connectionIsOk);
         if (!window.connectionIsOk) {
             event.preventDefault();
-            const { closeConnection } = require('./handlers');
-            closeConnection(() => { window.hide(); }).then(result => {
-                isDev && console.log('closeConnection ', result);
-                window.connectionIsOk = result;
-                if (result) {
+            try {
+                const { closeConnection } = require('./handlers');
+                closeConnection(() => { window.hide(); }).then(result => {
+                    isDev && console.log('closeConnection ', result);
+                    window.connectionIsOk = result;
+                    if (result) {
+                        window.close();
+                    }
+                }).catch(() => {
+                    window.connectionIsOk = true;
                     window.close();
-                }
-            });
+                });
+            } catch (e) {
+                window.connectionIsOk = true;
+                window.close();
+            }
         }
     });
 
