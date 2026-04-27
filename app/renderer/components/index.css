@@ -176,7 +176,7 @@
 .column-content_block-update_text h3 { color: #fff; }
 
 /* Shield image on main screen */
-.column-image_world { display: flex; align-items: center; justify-content: center; }
+.column-image_world { display: flex; align-items: center; justify-content: center; padding-top: 25px; }
 .column-image_world img { max-height: 200px; width: auto; filter: drop-shadow(0 0 24px rgba(35,123,231,0.35)); }
 
 /* ─── Connection switch ──────────────────────────────────────────────────── */
