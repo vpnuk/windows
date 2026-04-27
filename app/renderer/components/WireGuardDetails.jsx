@@ -52,7 +52,8 @@ const WireGuardDetails = observer(() => {
 
             const response = await axios.post(WG_AUTH_URL, params.toString(), {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                timeout: 15000
+                timeout: 15000,
+                validateStatus: () => true
             });
 
             if (response.data?.error) {
