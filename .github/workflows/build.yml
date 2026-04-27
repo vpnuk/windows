@@ -82,8 +82,8 @@ jobs:
           }
 
           # Delete existing release + tag if present (ignore errors)
-          gh release delete v1.3.0 --yes 2>$null; $true
-          git tag -d v1.3.0 2>$null; $true
+          gh release delete v1.3.0 --yes --cleanup-tag 2>$null; $true
+          git push origin :refs/tags/v1.3.0 2>$null; $true
 
           # Build file list
           $artifacts = @()
