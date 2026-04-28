@@ -1,7 +1,7 @@
 import React from 'react';
 import { observer } from 'mobx-react-lite';
 import { Layout, Progress } from 'antd';
-import WorldImage from '@assets/world.png';
+import ShieldImage from '@assets/shield.png';
 import '@components/index.css';
 import { useStore } from '@domain';
 
@@ -14,7 +14,7 @@ const UpdateInfo = observer(() => {
                 <div className="wrapper-content">
                     <div className="column" style={{ width: '100%', padding: '5%' }}>
                         <div className="column-image_world">
-                            <img alt="world-img" src={`${WorldImage}`} />
+                            <img alt="vpnuk-shield" src={`${ShieldImage}`} />
                         </div>
                         <div className="column-content_block">
                             <div className="column-content_block-title">UPDATE</div>
