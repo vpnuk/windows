@@ -1,30 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { action } from 'mobx';
-import { observer } from 'mobx-react-lite';
-import { Tabs, Radio } from 'antd';
+import { action }          from 'mobx';
+import { observer }        from 'mobx-react-lite';
+import { Tabs, Radio }     from 'antd';
 import {
-    ConnectionButton,
     ValueSelector,
     ServerSelector,
+    ConnectionButton,
     ConnectionDetails,
     OvpnDetails,
     WireGuardDetails,
     ConfigEditor,
 } from '@components';
 import '@components/index.css';
-import { VpnType } from '@modules/constants.js';
+import { VpnType }         from '@modules/constants.js';
 import { Servers, useStore } from '@domain';
-import { isDev } from '@app';
+import { isDev }           from '@app';
 
-const { TabPane } = Tabs;
-const { ipcRenderer } = require('electron');
+const { TabPane }       = Tabs;
+const { ipcRenderer }   = require('electron');
 
 const annotateProviderLabels = providers =>
     Object.entries(providers).map(([, provider]) => ({
-        value: provider.label,
-        label: provider.isDisabled
-            ? `${provider.label} — Coming soon`
-            : provider.label,
+        value:      provider.label,
+        label:      provider.isDisabled ? `${provider.label} — Coming soon` : provider.label,
         isDisabled: provider.isDisabled,
     }));
 
@@ -57,7 +55,7 @@ const Menu = observer(() => {
     return (
         <div>
             {/* ── Type (left) + Profile (right) ──────────────────────────── */}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 6 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 8 }}>
                 <div style={{ flex: '0 0 42%' }}>
                     <div className="form-label">Connection Type</div>
                     <ValueSelector
@@ -83,7 +81,7 @@ const Menu = observer(() => {
             </div>
 
             {/* ── Create new profile ─────────────────────────────────────── */}
-            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
                 <input
                     className="form-input"
                     placeholder="New profile name…"
@@ -98,13 +96,15 @@ const Menu = observer(() => {
             {/* ── Tabs ───────────────────────────────────────────────────── */}
             <Tabs className="menu-tabs" defaultActiveKey="profile" tabBarStyle={{ marginBottom: 0 }}>
                 <TabPane tab="Profile" key="profile">
-                    <ProfileTab />
+                    <ProfileTab logMsg={logMsg} setLogMsg={setLogMsg} />
                 </TabPane>
 
                 <TabPane tab="Connection" key="connection">
-                    <ConnectionDetails />
-                    {store.settings.vpnType === VpnType.OpenVPN.label && <OvpnDetails />}
-                    {store.settings.vpnType === VpnType.WireGuard.label && <WireGuardDetails />}
+                    <div style={{ paddingTop: 10 }}>
+                        <ConnectionDetails />
+                        {store.settings.vpnType === VpnType.OpenVPN.label   && <OvpnDetails />}
+                        {store.settings.vpnType === VpnType.WireGuard.label && <WireGuardDetails />}
+                    </div>
                 </TabPane>
 
                 <TabPane tab="Config" key="config">
@@ -118,16 +118,13 @@ const Menu = observer(() => {
                 </TabPane>
 
                 <TabPane tab="Log" key="log">
-                    <div style={{ paddingTop: 8 }}>
+                    <div style={{ paddingTop: 10 }}>
                         <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>
-                            Connection logs are saved per profile and open in your default text editor.
+                            Connection logs are saved per profile and opened in your default text editor.
                         </p>
                         <button
                             className="form-button"
-                            onClick={() => {
-                                setLogMsg('');
-                                ipcRenderer.send('log-open', profile.id);
-                            }}
+                            onClick={() => { setLogMsg(''); ipcRenderer.send('log-open', profile.id); }}
                         >
                             Open Connection Log
                         </button>
@@ -139,9 +136,6 @@ const Menu = observer(() => {
                     </div>
                 </TabPane>
             </Tabs>
-
-            {/* ── Connect button ─────────────────────────────────────────── */}
-            <ConnectionButton />
 
             {isDev && (
                 <button
@@ -156,14 +150,16 @@ const Menu = observer(() => {
     );
 });
 
-const ProfileTab = observer(() => {
+// ── Profile tab: credentials left, server list right ─────────────────────────
+const ProfileTab = observer(({ logMsg, setLogMsg }) => {
     const store   = useStore();
     const profile = store.profiles.currentProfile;
 
     return (
-        <div style={{ display: 'flex', gap: 10, paddingTop: 8 }}>
-            {/* ── Left: credentials + account type ───────────────────────── */}
-            <div style={{ flex: '0 0 44%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', gap: 10, paddingTop: 10 }}>
+            {/* ── Left: credentials + account type + connect ─────────────── */}
+            <div style={{ flex: '0 0 44%', display: 'flex', flexDirection: 'column', gap: 5 }}>
+
                 <div className="form-label">Username</div>
                 <input
                     className="form-input"
@@ -173,7 +169,7 @@ const ProfileTab = observer(() => {
                     onChange={action(e => profile.credentials.login = e.target.value.trim())}
                 />
 
-                <div className="form-label" style={{ marginTop: 4 }}>Password</div>
+                <div className="form-label">Password</div>
                 <input
                     className="form-input"
                     type="password"
@@ -183,7 +179,7 @@ const ProfileTab = observer(() => {
                     onChange={action(e => profile.credentials.password = e.target.value.trim())}
                 />
 
-                <div style={{ marginTop: 8 }}>
+                <div style={{ marginTop: 4 }}>
                     <Radio.Group
                         className="server-type-radio"
                         value={profile.serverType}
@@ -198,10 +194,15 @@ const ProfileTab = observer(() => {
                         <Radio.Button value="dedicated11">1:1</Radio.Button>
                     </Radio.Group>
                 </div>
+
+                {/* ── Connect button sits in the left column ──────────────── */}
+                <div style={{ marginTop: 6 }}>
+                    <ConnectionButton />
+                </div>
             </div>
 
-            {/* ── Right: server list ─────────────────────────────────────── */}
-            <div style={{ flex: 1, minWidth: 0, alignSelf: 'stretch' }}>
+            {/* ── Right: server list (capped height, scrolls internally) ─── */}
+            <div style={{ flex: 1, minWidth: 0 }}>
                 <ServerSelector />
             </div>
         </div>
