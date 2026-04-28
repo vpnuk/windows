@@ -142,11 +142,12 @@ ipcMain.on('is-dev-request', event => {
     event.sender.send('is-dev-response', isDev);
 });
 
-ipcMain.on('log-open', (_, profileId) => {
+ipcMain.on('log-open', (event, profileId) => {
     try {
         openLogFileExternal(profileId);
     } catch (error) {
         isDev && console.error('log-open error', error);
+        event.sender.send('log-open-error', error.message || 'Could not open log file.');
     }
 });
 
