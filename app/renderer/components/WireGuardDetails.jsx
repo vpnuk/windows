@@ -15,7 +15,7 @@ import { settingsPath }    from '@modules/constants.js';
 const fs          = require('fs');
 const path        = require('path');
 const { shell }   = require('electron');
-const { fetchWgConfig, deleteWgConfig, getConfEndpointIp } = require('@components/wgApi.js');
+const { fetchWgConfig, deleteWgConfig, getConfEndpointIp } = require('./wgApi');
 
 const MANAGE_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wireguard_v2.php';
 
