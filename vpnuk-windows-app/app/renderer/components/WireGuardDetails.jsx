@@ -37,7 +37,8 @@ const WireGuardDetails = observer(() => {
             setStatusType('error');
             return;
         }
-        if (!serverHost) {
+        const isShared = profile.serverType === 'shared';
+        if (isShared && !serverHost) {
             setStatus('Select a server in the Profile tab first.');
             setStatusType('error');
             return;
