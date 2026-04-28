@@ -63,6 +63,11 @@ const App = observer(() => {
                         ipcRenderer.send('default-gateway-request');
                     }, 500);
                 }
+
+                // Run OpenVPN update check AFTER initializeCatalogs has written
+                // the current versions.json — avoids false "update available" on first run
+                ovpnCheckUpdate();
+                scheduler.schedule('ovpn-check-update', ovpnCheckUpdate, 72 * HOUR_MS);
             })
             .catch(err => {
                 isDev && console.error('initializeCatalogs error', err);
@@ -80,8 +85,6 @@ const App = observer(() => {
         ipcRenderer.send('default-gateway-request');
         ipcRenderer.send('ipv6-fix');
         ipcRenderer.send('auto-update-enable');
-        ovpnCheckUpdate();
-        scheduler.schedule('ovpn-check-update', ovpnCheckUpdate, 72 * HOUR_MS);
     }, []);
 
     // Show notification from main process
