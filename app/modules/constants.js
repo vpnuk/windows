@@ -23,6 +23,17 @@ const path = require('path');
 const settingsFolder = path.resolve(require('process').env.APPDATA + '\\VPNUK');
 exports.settingsFolder = settingsFolder;
 
+// Returns the .conf filename slug for a given serverType + serverDns.
+// Dedicated and 1:1 accounts always map to a fixed 'dedicated' slug because
+// the server always returns the same config regardless of which server is
+// selected in the UI.  Shared accounts use the server DNS slug so each server
+// gets its own file (e.g. shared32.vpnuk.net → shared32.conf).
+// All components MUST use this function so they agree on the same path.
+exports.wgConfSlug = (serverType, serverDns) => {
+    if (serverType === 'dedicated' || serverType === 'dedicated11') return 'dedicated';
+    return serverDns ? serverDns.replace(/\.vpnuk\.net$/i, '') : 'vpnuk-wg';
+};
+
 exports.settingsPath = {
     folder: settingsFolder,
     versions: path.join(settingsFolder, 'versions.json'),
@@ -35,9 +46,8 @@ exports.settingsPath = {
     ovpnBinExe: path.join(settingsFolder, 'ovpnBin', 'bin', 'openvpn.exe'),
     ikev2Cert: path.join(settingsFolder, 'ikev2.crt'),
     device: path.join(settingsFolder, 'device.json'),
-    wgConf: (profileId, serverDns) => {
-        // Use DNS slug as filename: shared32.vpnuk.net → shared32.conf
-        const slug = serverDns ? serverDns.replace(/\.vpnuk\.net$/i, '') : 'vpnuk-wg';
+    wgConf: (serverType, serverDns) => {
+        const slug = exports.wgConfSlug(serverType, serverDns);
         return path.join(settingsFolder, `${slug}.conf`);
     },
 };
