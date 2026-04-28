@@ -502,14 +502,15 @@ FunctionEnd
         nsDialogs::SetUserData $hwnd "true"
         ${NSD_OnClick} $hwnd un.wgRadioClick
         ${NSD_AddStyle} $hwnd ${WS_GROUP}
-        StrCpy $wgHwnd $hwnd          ; save the "Yes" button handle
+        Push $hwnd                    ; stash the "Yes" handle — no Var needed
 
         ${NSD_CreateRadioButton} 12u 60u 100% 12u "No"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "false"
         ${NSD_OnClick} $hwnd un.wgRadioClick
 
-        ${NSD_Check} $wgHwnd          ; pre-select "Yes" by default
+        Pop $R0                       ; retrieve the "Yes" handle from stack
+        ${NSD_Check} $R0              ; pre-select "Yes" by default
         StrCpy $wgFlag "true"         ; initialise flag to match
 
     ; ------------- User data -------------
