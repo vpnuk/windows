@@ -16,9 +16,9 @@ export const selectOptionColors = {
                 ? bgMuted
                 : bgCard,
         color: text,
-        fontSize: 13,
+        fontSize: 12,
         cursor: 'pointer',
-        padding: '10px 14px',
+        padding: '6px 12px',
     }),
     control: (provided, state) => ({
         ...provided,
@@ -26,14 +26,15 @@ export const selectOptionColors = {
         borderRadius: 45,
         border: `1px solid ${state.isFocused ? primary : 'transparent'}`,
         boxShadow: state.isFocused ? `0 0 0 1px ${primary}` : 'none',
-        height: 44,
-        minHeight: 44,
+        height: 32,
+        minHeight: 32,
         width: '100%',
         cursor: 'pointer',
         '&:hover': { borderColor: primary },
     }),
-    singleValue: provided => ({ ...provided, color: text }),
-    placeholder: provided => ({ ...provided, color: textMuted }),
+    valueContainer: provided => ({ ...provided, padding: '0 12px' }),
+    singleValue: provided => ({ ...provided, color: text, fontSize: 13 }),
+    placeholder: provided => ({ ...provided, color: textMuted, fontSize: 13 }),
     menuPortal: provided => ({ ...provided, zIndex: 9999 }),
     menu: provided => ({
         ...provided,
@@ -46,7 +47,7 @@ export const selectOptionColors = {
     menuList: provided => ({ ...provided, padding: 4 }),
     input: provided => ({ ...provided, color: text }),
     indicatorSeparator: () => ({ display: 'none' }),
-    dropdownIndicator: provided => ({ ...provided, color: textMuted }),
+    dropdownIndicator: provided => ({ ...provided, color: textMuted, padding: '0 6px' }),
 };
 
 export const modalStyle = {
