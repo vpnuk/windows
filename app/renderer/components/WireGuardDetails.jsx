@@ -80,45 +80,60 @@ const WireGuardDetails = observer(() => {
         setStatus('Fetching WireGuard configuration...');
         setStatusType('');
 
-        // Always send server=<IP> for every account type.
-        // Shared accounts need it to select the shared server.
-        // Dedicated/1:1 accounts also need it — the API returns HTTP 400
-        // ("Server address required") when it is omitted, regardless of account type.
-        const body = {
-            action:      'get_config',
-            username:    login,
-            password,
-            server_type: profile.serverType,
-            server:      serverHost,
-        };
-
         log(profile.id, `=== WireGuard Config Fetch ===`);
         log(profile.id, `serverType : ${profile.serverType}`);
         log(profile.id, `serverDns  : ${serverDns}`);
         log(profile.id, `serverHost : ${serverHost}`);
         log(profile.id, `confPath   : ${confPath}`);
-        log(profile.id, `API params : action=get_config username=${login} server_type=${profile.serverType} server=${serverHost}`);
 
-        try {
-            const params = new URLSearchParams(body);
+        // The API always requires a `server` param, but dedicated server IPs are
+        // NOT in the shared-server pool so sending the IP gives "Invalid server selected".
+        // We try candidates in order and stop at the first non-"invalid server" response:
+        //   1. Full DNS name (uk20.vpnuk.net)
+        //   2. Short slug   (uk20)
+        //   3. IP address   (fallback / shared always uses IP)
+        const serverSlug = serverDns.replace(/\.vpnuk\.net$/i, '');
+        const candidates = isShared
+            ? [serverHost]
+            : [serverDns, serverSlug, serverHost];
+
+        const apiPost = async (serverParam) => {
+            const body = {
+                action:      'get_config',
+                username:    login,
+                password,
+                server_type: profile.serverType,
+                server:      serverParam,
+            };
+            log(profile.id, `--- attempt server="${serverParam}" ---`);
+            const params   = new URLSearchParams(body);
             const response = await axios.post(WG_AUTH_URL, params.toString(), {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 timeout: 15000,
                 validateStatus: () => true,
             });
+            log(profile.id, `HTTP ${response.status} : ${JSON.stringify(response.data)}`);
+            return response;
+        };
 
-            log(profile.id, `HTTP status : ${response.status}`);
-            log(profile.id, `Response    : ${JSON.stringify(response.data)}`);
+        try {
+            let response = null;
+            for (const candidate of candidates) {
+                response = await apiPost(candidate);
+                // Keep trying while the server explicitly says the server value is wrong.
+                // Any other error (auth failure, network, etc.) stops the loop immediately.
+                const errMsg = (response.data?.error || '').toLowerCase();
+                if (!errMsg.includes('invalid server')) break;
+            }
 
             if (response.data?.error) {
                 const errMsg = response.data.error;
-                log(profile.id, `API error   : ${errMsg}`);
+                log(profile.id, `API error: ${errMsg}`);
                 setStatus(errMsg);
                 setStatusType('error');
 
             } else if (response.data?.config) {
-                // Post-process: replace hostname in Endpoint with the server IP
-                const rawConf    = response.data.config;
+                const rawConf     = response.data.config;
                 const patchedConf = patchEndpointToIp(rawConf, serverHost);
 
                 const endpointRaw     = (rawConf.match(/^Endpoint\s*=.+/m)     || [''])[0];
