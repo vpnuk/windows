@@ -7,8 +7,34 @@ import { settingsPath } from '@modules/constants.js';
 
 const axios = require('axios');
 const fs    = require('fs');
+const path  = require('path');
 
 const WG_AUTH_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wg_v2_app_api.php';
+
+// Write to the profile's VPN log file so it appears in the LOG tab.
+// vpnuk-wg.conf lives in settingsFolder; logs/ is a sibling directory.
+const makeLogAppender = confPath => (profileId, msg) => {
+    try {
+        const logDir  = path.join(path.dirname(confPath), 'logs');
+        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+        const logFile = path.join(logDir, `${profileId}.log`);
+        const line    = `[${new Date().toISOString()}] ${msg}\n`;
+        fs.appendFileSync(logFile, line, 'utf-8');
+    } catch { /* best-effort */ }
+};
+
+// Replace the Endpoint hostname with the server IP in a WireGuard conf
+const useIpEndpoint = (conf, serverIp) => {
+    if (!conf || !serverIp) return conf;
+    return conf.replace(
+        /^(Endpoint\s*=\s*)([a-zA-Z0-9._-]+)(\s*:\s*\d+)/m,
+        (_, prefix, host, portPart) => {
+            // Only replace if host is not already an IP
+            const isIp = /^\d+\.\d+\.\d+\.\d+$/.test(host);
+            return isIp ? `${prefix}${host}${portPart}` : `${prefix}${serverIp}${portPart}`;
+        }
+    );
+};
 
 const WireGuardDetails = observer(() => {
     const store   = useStore();
@@ -17,14 +43,15 @@ const WireGuardDetails = observer(() => {
     const [statusType, setStatusType] = useState('');
     const [loading, setLoading] = useState(false);
 
-    // dns  = hostname like uk20.vpnuk.net / shared32.vpnuk.net
-    // host = IP address (used for shared API param)
     const serverDns  = profile.server?.dns  || '';
-    const serverHost = profile.server?.host || '';
+    const serverHost = profile.server?.host || '';     // IP address
     const isShared   = profile.serverType === 'shared';
 
-    // Config file is named by DNS slug: shared32.vpnuk.net → shared32.conf
-    const confPath = settingsPath.wgConf(profile.id, serverDns);
+    // Config file path (DNS slug: shared32.vpnuk.net → shared32.conf)
+    const confPath  = settingsPath.wgConf(profile.id, serverDns);
+    const confName  = path.basename(confPath);         // e.g. shared32.conf
+    const confDir   = path.dirname(confPath);          // %APPDATA%\VPNUK
+    const log       = makeLogAppender(confPath);
 
     useEffect(() => {
         setStatus('');
@@ -57,38 +84,62 @@ const WireGuardDetails = observer(() => {
         setLoading(true);
         setStatus('Fetching WireGuard configuration...');
         setStatusType('');
+
+        // --- Build API params ---
+        // Shared: server = IP (proven working)
+        // Dedicated / 1:1: no server param — API returns error for shared only
+        const body = { action: 'get_config', username: login, password, server_type: profile.serverType };
+        if (isShared) body.server = serverHost;
+
+        log(profile.id, `=== WireGuard Config Fetch ===`);
+        log(profile.id, `serverType : ${profile.serverType}`);
+        log(profile.id, `serverDns  : ${serverDns}`);
+        log(profile.id, `serverHost : ${serverHost}`);
+        log(profile.id, `confPath   : ${confPath}`);
+        log(profile.id, `API params : action=get_config username=${login} server_type=${profile.serverType}${isShared ? ` server=${serverHost}` : ''}`);
+
         try {
-            // Shared accounts: send server as IP address (serverHost)
-            // Dedicated / 1:1: send server as DNS hostname (serverDns)
-            const serverParam = isShared ? serverHost : serverDns;
-
-            const params = new URLSearchParams({
-                action: 'get_config',
-                username: login,
-                password,
-                server_type: profile.serverType,
-                server: serverParam,
-            });
-
+            const params = new URLSearchParams(body);
             const response = await axios.post(WG_AUTH_URL, params.toString(), {
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 timeout: 15000,
-                validateStatus: () => true
+                validateStatus: () => true,
             });
 
+            log(profile.id, `HTTP status : ${response.status}`);
+            log(profile.id, `Response    : ${JSON.stringify(response.data)}`);
+
             if (response.data?.error) {
-                setStatus(response.data.error);
+                const errMsg = response.data.error;
+                log(profile.id, `API error   : ${errMsg}`);
+                setStatus(errMsg);
                 setStatusType('error');
+
             } else if (response.data?.config) {
-                fs.writeFileSync(confPath, response.data.config, 'utf-8');
+                // Post-process: replace hostname in Endpoint with the server IP
+                const rawConf    = response.data.config;
+                const patchedConf = useIpEndpoint(rawConf, serverHost);
+
+                const endpointRaw     = (rawConf.match(/^Endpoint\s*=.+/m)     || [''])[0];
+                const endpointPatched = (patchedConf.match(/^Endpoint\s*=.+/m) || [''])[0];
+
+                log(profile.id, `Endpoint original : ${endpointRaw}`);
+                log(profile.id, `Endpoint patched  : ${endpointPatched}`);
+
+                fs.writeFileSync(confPath, patchedConf, 'utf-8');
                 action(() => { profile.wgConfigFetched = !profile.wgConfigFetched; })();
-                setStatus('Config saved. You can now connect.');
+
+                setStatus(`Config saved: ${confName}  (${confDir})`);
                 setStatusType('ok');
+                log(profile.id, `Config written to: ${confPath}`);
+
             } else {
-                setStatus('Unexpected response from server. Please try again.');
+                log(profile.id, `Unexpected response: ${JSON.stringify(response.data)}`);
+                setStatus('Unexpected response from server. Check the LOG tab.');
                 setStatusType('error');
             }
         } catch (err) {
+            log(profile.id, `Fetch exception: ${err.message}`);
             setStatus(
                 err.code === 'ECONNABORTED'
                     ? 'Request timed out. Check your internet connection.'
@@ -106,6 +157,7 @@ const WireGuardDetails = observer(() => {
             action(() => { profile.wgConfigFetched = !profile.wgConfigFetched; })();
             setStatus('Config cleared. Fetch again to reconnect.');
             setStatusType('');
+            log(profile.id, `Config cleared: ${confPath}`);
         } catch {
             setStatus('Failed to clear config.');
             setStatusType('error');
@@ -126,6 +178,11 @@ const WireGuardDetails = observer(() => {
                             : 'A config will be generated for the selected server. Switch servers and fetch again for each one.'
                         }
                     </p>
+                    {hasConfig && (
+                        <p style={{ fontSize: 11, opacity: 0.7, margin: '4px 0 0' }}>
+                            Saved: {confName}
+                        </p>
+                    )}
                 </div>
             </div>
 

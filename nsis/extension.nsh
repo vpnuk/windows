@@ -42,9 +42,18 @@ send:
 !define uninstallOvpn "!insertmacro uninstallOvpn"
 
 !macro uninstallWg
+    ; Try registry first, then fall back to known install paths
     ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\WireGuard" "UninstallString"
+    ${If} $0 == ""
+        IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" 0 +2
+        StrCpy $0 "$PROGRAMFILES64\WireGuard\wireguard.exe"
+        ${If} $0 == ""
+            IfFileExists "$PROGRAMFILES\WireGuard\wireguard.exe" 0 +2
+            StrCpy $0 "$PROGRAMFILES\WireGuard\wireguard.exe"
+        ${EndIf}
+    ${EndIf}
     ${If} $0 != ""
-        nsExec::ExecToStack '"$0" /S'
+        nsExec::ExecToStack '"$0" /uninstall'
         Pop $0
         Pop $0
         Sleep 3000
@@ -410,11 +419,11 @@ FunctionEnd
 
     Function un.OvpnPageCreate
         ReadRegStr $0 HKLM SOFTWARE\OpenVPN exe_path
-        ReadRegStr $1 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\WireGuard" "UninstallString"
-        ${If} $0 == ""
-        ${AndIf} $1 == ""
-            Abort
-        ${EndIf}
+
+        ; Pre-initialise flags so validation in Leave never sees empty string
+        StrCpy $ovpnFlag "false"
+        StrCpy $wgFlag "false"
+        StrCpy $userDataFlag "false"
 
         !insertmacro MUI_HEADER_TEXT $(title) $(subtitle)
         nsDialogs::Create 1018
@@ -443,37 +452,35 @@ FunctionEnd
             StrCpy $ovpnFlag "false"
         ${EndIf}
 
-    ; -------------- WireGuard --------------
-        ${If} $1 != ""
-            ${NSD_CreateLabel} 0u 36u 100% 12u "Uninstall WireGuard"
-            Pop $hwnd
-
-            ${NSD_CreateRadioButton} 12u 48u 100% 12u "Yes"
-            pop $hwnd
-            nsDialogs::SetUserData $hwnd "true"
-            ${NSD_OnClick} $hwnd un.wgRadioClick
-            ${NSD_AddStyle} $hwnd ${WS_GROUP}
-
-            ${NSD_CreateRadioButton} 12u 60u 100% 12u "No"
-            pop $hwnd
-            nsDialogs::SetUserData $hwnd "false"
-            ${NSD_OnClick} $hwnd un.wgRadioClick
-
-            ${NSD_Check} $hwnd
-            StrCpy $wgFlag "false"
-        ${EndIf}
-
-    ; ------------- User data -------------
-        ${NSD_CreateLabel} 0u 72u 100% 12u "Clear application user data"
+    ; -------------- WireGuard (always shown) --------------
+        ${NSD_CreateLabel} 0u 36u 100% 12u "Uninstall WireGuard"
         Pop $hwnd
 
-        ${NSD_CreateRadioButton} 12u 84u 100% 12u "Yes"
+        ${NSD_CreateRadioButton} 12u 48u 100% 12u "Yes"
+        pop $hwnd
+        nsDialogs::SetUserData $hwnd "true"
+        ${NSD_OnClick} $hwnd un.wgRadioClick
+        ${NSD_AddStyle} $hwnd ${WS_GROUP}
+
+        ${NSD_CreateRadioButton} 12u 60u 100% 12u "No"
+        pop $hwnd
+        nsDialogs::SetUserData $hwnd "false"
+        ${NSD_OnClick} $hwnd un.wgRadioClick
+
+        ${NSD_Check} $hwnd
+        StrCpy $wgFlag "false"
+
+    ; ------------- User data -------------
+        ${NSD_CreateLabel} 0u 76u 100% 12u "Clear application user data"
+        Pop $hwnd
+
+        ${NSD_CreateRadioButton} 12u 88u 100% 12u "Yes"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "true"
         ${NSD_OnClick} $hwnd un.dataRadioClick
         ${NSD_AddStyle} $hwnd ${WS_GROUP}
 
-        ${NSD_CreateRadioButton} 12u 96u 100% 12u "No"
+        ${NSD_CreateRadioButton} 12u 100u 100% 12u "No"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "false"
         ${NSD_OnClick} $hwnd un.dataRadioClick

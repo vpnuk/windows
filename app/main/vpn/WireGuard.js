@@ -34,15 +34,27 @@ class WireGuard extends VpnBase {
 
     constructor(profile, hooks) {
         super(profile, hooks);
-        this.#confPath      = settingsPath.wgConf(profile.id, profile.server?.host);
+        // Use server DNS name (shared32.vpnuk.net → shared32.conf) to match fetch path
+        this.#confPath      = settingsPath.wgConf(profile.id, profile.server?.dns);
         this.#tunnelName    = path.basename(this.#confPath, '.conf');
         this.#connectionStatus = connectionStates.disconnected;
     }
 
     async connect() {
+        const ts = () => new Date().toISOString();
+
+        this._logStream.write(`\n[${ts()}] === WireGuard Connect ===\n`);
+        this._logStream.write(`[${ts()}] server.label : ${this._server?.label || '(none)'}\n`);
+        this._logStream.write(`[${ts()}] server.dns   : ${this._server?.dns  || '(none)'}\n`);
+        this._logStream.write(`[${ts()}] server.host  : ${this._server?.host || '(none)'}\n`);
+        this._logStream.write(`[${ts()}] confPath     : ${this.#confPath}\n`);
+        this._logStream.write(`[${ts()}] tunnelName   : ${this.#tunnelName}\n`);
+        this._logStream.write(`[${ts()}] confExists   : ${fs.existsSync(this.#confPath)}\n`);
+
         if (!fs.existsSync(this.#confPath)) {
+            this._logStream.write(`[${ts()}] ERROR: conf file not found\n`);
             this._errorHook?.(new Error(
-                'WireGuard config not found. Open Settings → Profile and click "Fetch WireGuard Config" first.'
+                'WireGuard config not found. Open Settings → Connection tab and click "Fetch WireGuard Config" first.'
             ));
             return;
         }
@@ -51,10 +63,12 @@ class WireGuard extends VpnBase {
         try {
             wgExe = getWireGuardExePath();
         } catch (err) {
+            this._logStream.write(`[${ts()}] ERROR: WireGuard exe not found: ${err.message}\n`);
             this._errorHook?.(err);
             return;
         }
 
+        this._logStream.write(`[${ts()}] wgExe        : ${wgExe}\n`);
         this._connectingHook?.();
         this.#connectionStatus = connectionStates.connecting;
 
@@ -66,8 +80,9 @@ class WireGuard extends VpnBase {
             { shell: false }
         );
 
-        this._logStream.write(`wireguard /installtunnelservice exit: ${result.status}\n`);
-        if (result.stderr) this._logStream.write('' + result.stderr);
+        this._logStream.write(`[${ts()}] wireguard /installtunnelservice exit: ${result.status}\n`);
+        if (result.stdout) this._logStream.write(`[stdout] ${result.stdout}\n`);
+        if (result.stderr) this._logStream.write(`[stderr] ${result.stderr}\n`);
 
         if (result.status === 0) {
             this.#connectionStatus = connectionStates.connected;
@@ -76,7 +91,7 @@ class WireGuard extends VpnBase {
             this.#connectionStatus = connectionStates.disconnected;
             this._disconnectedHook?.();
             this._errorHook?.(new Error(
-                'WireGuard tunnel failed to start. Check the connection log for details.'
+                'WireGuard tunnel failed to start. Check the LOG tab for details.'
             ));
         }
     }

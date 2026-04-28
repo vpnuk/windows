@@ -35,13 +35,13 @@ const formatServerOption = option => (
 );
 
 const WireGuardConfigStatus = observer(({ profile }) => {
-    const serverHost = profile.server?.host || '';
+    const serverDns = profile.server?.dns || '';
     void profile.wgConfigFetched;
-    const confPath = serverHost ? settingsPath.wgConf(profile.id, serverHost) : null;
+    const confPath = serverDns ? settingsPath.wgConf(profile.id, serverDns) : null;
     let hasConfig = false;
     try { hasConfig = confPath ? fs.existsSync(confPath) : false; } catch { }
 
-    if (!serverHost) return null;
+    if (!serverDns) return null;
 
     return hasConfig ? (
         <p style={{ margin: '8px 0 0', fontSize: 12, color: '#1aceb8' }}>
