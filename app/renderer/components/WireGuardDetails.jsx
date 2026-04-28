@@ -5,9 +5,12 @@ import '@components/index.css';
 import { useStore } from '@domain';
 import { settingsPath } from '@modules/constants.js';
 
-const axios = require('axios');
-const fs    = require('fs');
-const path  = require('path');
+const axios        = require('axios');
+const fs           = require('fs');
+const path         = require('path');
+const { shell }    = require('electron');
+
+const MANAGE_CONFIGS_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wireguard_v2.php';
 
 const WG_AUTH_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wg_v2_app_api.php';
 
@@ -189,7 +192,10 @@ const WireGuardDetails = observer(() => {
         }
     };
 
-    const hasConfig = configExists();
+    const hasConfig    = configExists();
+    const isLimitError = status.toLowerCase().includes('config limit reached');
+
+    const openManageConfigs = () => shell.openExternal(MANAGE_CONFIGS_URL);
 
     return (
         <div style={{ paddingTop: 8 }}>
@@ -230,9 +236,49 @@ const WireGuardDetails = observer(() => {
                     </button>
                 )}
 
-                {status && (
+                {/* Config limit error: show a prominent warning with a direct link */}
+                {isLimitError && (
+                    <div className="app-notification app-notification--warning" style={{ marginTop: 10 }}>
+                        <span className="app-notification-icon">⚠️</span>
+                        <div className="app-notification-body">
+                            <h4>Config limit reached</h4>
+                            <p>
+                                You have the maximum number of WireGuard configs for this account.
+                                Delete an old one first, then fetch again.
+                            </p>
+                            <button
+                                className="form-button"
+                                onClick={openManageConfigs}
+                                style={{ marginTop: 8, height: 32, fontSize: 12 }}
+                            >
+                                Manage WireGuard Configs →
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Regular status message (non-limit errors and success) */}
+                {status && !isLimitError && (
                     <p className={`wg-status ${statusType}`}>{status}</p>
                 )}
+            </div>
+
+            {/* Always-visible manage link at the bottom */}
+            <div style={{ textAlign: 'center', marginTop: 12 }}>
+                <button
+                    onClick={openManageConfigs}
+                    style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        fontSize: 11,
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        padding: 0,
+                    }}
+                >
+                    View / manage all WireGuard configs
+                </button>
             </div>
         </div>
     );
