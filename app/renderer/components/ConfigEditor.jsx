@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react-lite';
 import '@components/index.css';
-import { VpnType } from '@modules/constants.js';
-import { settingsPath, settingsLink } from '@modules/constants.js';
+import { VpnType, settingsPath, settingsLink, wgConfSlug } from '@modules/constants.js';
 
 const fs = require('fs');
 
@@ -23,7 +22,7 @@ const writeFile = (path, content) => {
     }
 };
 
-const ConfigEditor = observer(({ vpnType, profileId, serverDns, reloadKey }) => {
+const ConfigEditor = observer(({ vpnType, profileId, serverType, serverDns, reloadKey }) => {
     const isWireGuard = vpnType === VpnType.WireGuard.label;
     const isOpenVPN   = vpnType === VpnType.OpenVPN.label;
 
@@ -41,7 +40,7 @@ const ConfigEditor = observer(({ vpnType, profileId, serverDns, reloadKey }) => 
 
     return isOpenVPN
         ? <OvpnConfigEditor />
-        : <WgConfigEditor profileId={profileId} serverDns={serverDns} reloadKey={reloadKey} />;
+        : <WgConfigEditor profileId={profileId} serverType={serverType} serverDns={serverDns} reloadKey={reloadKey} />;
 });
 
 const OvpnConfigEditor = () => {
@@ -112,12 +111,12 @@ const OvpnConfigEditor = () => {
     );
 };
 
-const WgConfigEditor = ({ profileId, serverDns, reloadKey }) => {
+const WgConfigEditor = ({ profileId, serverType, serverDns, reloadKey }) => {
     const [content, setContent] = useState('');
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
     const confPath = profileId
-        ? settingsPath.wgConf(profileId, serverDns)
+        ? settingsPath.wgConf(serverType, serverDns)
         : null;
 
     // reloadKey changes every time a config is fetched or cleared, so the
