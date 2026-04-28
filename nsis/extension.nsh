@@ -42,9 +42,9 @@ send:
 !define uninstallOvpn "!insertmacro uninstallOvpn"
 
 !macro uninstallWg
-    ; Step 1 — Stop any running VPNUK WireGuard tunnel services so the kernel
-    ; driver is not in use when the WireGuard uninstaller tries to remove it.
-    nsExec::ExecToStack 'cmd /c for /F "tokens=2 delims=$ " %S in ('"'"'sc query type= all state= all ^| findstr "WireGuardTunnel"'"'"') do sc stop "WireGuardTunnel$%S"'
+    ; Step 1 — Stop any running WireGuardTunnel services so the kernel driver
+    ; is not in use when the WireGuard uninstaller tries to remove it.
+    nsExec::ExecToStack 'powershell -NonInteractive -Command "Get-Service -Name WireGuardTunnel* -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue"'
     Pop $0
     Pop $0
     Sleep 2000
