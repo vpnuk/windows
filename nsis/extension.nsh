@@ -455,7 +455,6 @@ FunctionEnd
     Var ovpnDialog
     Var hwnd
     Var ovpnFlag
-    Var wgFlag
     Var userDataFlag
 
     Function un.OvpnPageCreate
@@ -463,7 +462,6 @@ FunctionEnd
 
         ; Pre-initialise flags so validation in Leave never sees empty string
         StrCpy $ovpnFlag "false"
-        StrCpy $wgFlag "false"
         StrCpy $userDataFlag "false"
 
         !insertmacro MUI_HEADER_TEXT $(title) $(subtitle)
@@ -493,37 +491,17 @@ FunctionEnd
             StrCpy $ovpnFlag "false"
         ${EndIf}
 
-    ; -------------- WireGuard (always shown, defaults to Yes) --------------
-        ${NSD_CreateLabel} 0u 36u 100% 12u "Uninstall WireGuard"
+    ; ------------- User data -------------
+        ${NSD_CreateLabel} 0u 36u 100% 12u "Clear application user data"
         Pop $hwnd
 
         ${NSD_CreateRadioButton} 12u 48u 100% 12u "Yes"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "true"
-        ${NSD_OnClick} $hwnd un.wgRadioClick
-        ${NSD_AddStyle} $hwnd ${WS_GROUP}
-        Push $hwnd                    ; stash the "Yes" handle — no Var needed
-
-        ${NSD_CreateRadioButton} 12u 60u 100% 12u "No"
-        pop $hwnd
-        nsDialogs::SetUserData $hwnd "false"
-        ${NSD_OnClick} $hwnd un.wgRadioClick
-
-        Pop $R0                       ; retrieve the "Yes" handle from stack
-        ${NSD_Check} $R0              ; pre-select "Yes" by default
-        StrCpy $wgFlag "true"         ; initialise flag to match
-
-    ; ------------- User data -------------
-        ${NSD_CreateLabel} 0u 76u 100% 12u "Clear application user data"
-        Pop $hwnd
-
-        ${NSD_CreateRadioButton} 12u 88u 100% 12u "Yes"
-        pop $hwnd
-        nsDialogs::SetUserData $hwnd "true"
         ${NSD_OnClick} $hwnd un.dataRadioClick
         ${NSD_AddStyle} $hwnd ${WS_GROUP}
 
-        ${NSD_CreateRadioButton} 12u 100u 100% 12u "No"
+        ${NSD_CreateRadioButton} 12u 60u 100% 12u "No"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "false"
         ${NSD_OnClick} $hwnd un.dataRadioClick
@@ -538,11 +516,6 @@ FunctionEnd
     Function un.ovpnRadioClick
         ${radioBtnClick}
         Pop $ovpnFlag
-    FunctionEnd
-
-    Function un.wgRadioClick
-        ${radioBtnClick}
-        Pop $wgFlag
     FunctionEnd
 
     Function un.dataRadioClick
@@ -570,11 +543,6 @@ FunctionEnd
             ${uninstallOvpn}
         ${EndIf}
 
-        ; ------------- WireGuard -------------
-        ${If} $wgFlag == true
-            ${uninstallWg}
-        ${EndIf}
-        
         ; ------------- User data -------------
         ${If} $userDataFlag == true
             RMDir /r "$APPDATA\VPNUK"
