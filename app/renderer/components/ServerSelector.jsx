@@ -1,18 +1,18 @@
 /**
  * ServerSelector — scrollable multi-row server list.
  *
- * Replaces the old react-select dropdown.  Dark-blue background throughout;
- * only the selected row gets the bright primary-dark blue highlight.
- * The server type radio (Shared / Dedicated / 1:1) lives in the Profile tab
- * layout in Menu.jsx; this component just renders the list for the current type.
+ * Fixed height shows ~7 rows; the rest scrolls.
+ * Auto-initialises profile.server to catalog[0] when the server host is blank
+ * (new profile, or serverType switch) so the connection flow always has a
+ * valid endpoint to work with.
  */
 
 import React, { useRef, useEffect } from 'react';
-import { action } from 'mobx';
-import { observer } from 'mobx-react-lite';
-import ReactCountryFlag from 'react-country-flag';
+import { action, runInAction }      from 'mobx';
+import { observer }                  from 'mobx-react-lite';
+import ReactCountryFlag              from 'react-country-flag';
 import '@components/index.css';
-import { Servers, useStore } from '@domain';
+import { Servers, useStore }         from '@domain';
 
 const toIso = code => (code === 'UK' ? 'GB' : (code || '').toUpperCase());
 
@@ -21,11 +21,19 @@ const ServerSelector = observer(() => {
     const catalog = Servers.getCatalog(profile.serverType);
     const listRef = useRef(null);
 
+    // ── Auto-init: if the stored server has no host, select the first entry ──
+    useEffect(() => {
+        if (catalog.length > 0 && !profile.server?.host) {
+            runInAction(() => { profile.server = catalog[0]; });
+        }
+    }, [profile.serverType, catalog.length]);
+
+    // ── Scroll the selected row into view ────────────────────────────────────
     useEffect(() => {
         if (!listRef.current) return;
         const sel = listRef.current.querySelector('[data-selected="true"]');
         if (sel) sel.scrollIntoView({ block: 'nearest' });
-    }, [profile.serverType, profile.server]);
+    }, [profile.server?.host]);
 
     return (
         <div ref={listRef} className="server-list">
@@ -35,9 +43,9 @@ const ServerSelector = observer(() => {
                 </div>
             )}
             {catalog.map((server, i) => {
-                const isSelected =
-                    (profile.server?.host && profile.server.host === server.host) ||
-                    (!profile.server?.host && i === 0);
+                const isSelected = profile.server?.host
+                    ? profile.server.host === server.host
+                    : i === 0;
 
                 return (
                     <div
