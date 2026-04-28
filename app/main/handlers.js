@@ -90,9 +90,18 @@ ipcMain.on('connection-start', async (event, args) => {
             if (profile.killSwitchEnabled) {
                 deleteRouteSync(defaultRoute, gateway).trim();
             }
-            const ip = await publicIp.v4().catch(() => 'unknown');
+            // Mark connected immediately so the UI responds without waiting for the IP lookup.
             event.sender.send('connection-changed', connectionStates.connected);
-            tray.setConnectedState(`Connected to ${profile.server.label}\nYour IP: ${ip}`);
+            tray.setConnectedState(`Connected to ${profile.server.label}`);
+            // WireGuard: the tunnel service starts before the kernel completes its
+            // handshake and applies the new routing table.  Fetching the public IP
+            // too early returns the ISP address instead of the VPN exit IP.
+            // Wait 3 s for routing to stabilise, then do the lookup through the tunnel.
+            await new Promise(r => setTimeout(r, 3000));
+            const ip = await publicIp.v4({ timeout: 10000 }).catch(() => null);
+            if (ip) {
+                tray.setConnectedState(`Connected to ${profile.server.label}\nYour IP: ${ip}`);
+            }
         },
         disconnectedHook: () => {
             try {
