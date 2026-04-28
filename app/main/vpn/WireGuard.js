@@ -27,8 +27,6 @@ const getWireGuardExePath = () => {
     throw new Error('WireGuard is not installed. Please install it from wireguard.com or restart the app to trigger auto-install.');
 };
 
-const getTunnelName = profileId => `VPNUK-WG-${profileId.slice(0, 8)}`;
-
 class WireGuard extends VpnBase {
     #tunnelName;
     #confPath;
@@ -36,8 +34,8 @@ class WireGuard extends VpnBase {
 
     constructor(profile, hooks) {
         super(profile, hooks);
-        this.#tunnelName    = getTunnelName(profile.id);
         this.#confPath      = settingsPath.wgConf(profile.id, profile.server?.host);
+        this.#tunnelName    = path.basename(this.#confPath, '.conf');
         this.#connectionStatus = connectionStates.disconnected;
     }
 
@@ -64,11 +62,11 @@ class WireGuard extends VpnBase {
 
         const result = cp.spawnSync(
             wgExe,
-            ['/installtunnel', this.#confPath],
+            ['/installtunnelservice', this.#confPath],
             { shell: false }
         );
 
-        this._logStream.write(`wireguard /installtunnel exit: ${result.status}\n`);
+        this._logStream.write(`wireguard /installtunnelservice exit: ${result.status}\n`);
         if (result.stderr) this._logStream.write('' + result.stderr);
 
         if (result.status === 0) {
@@ -77,7 +75,6 @@ class WireGuard extends VpnBase {
         } else {
             this.#connectionStatus = connectionStates.disconnected;
             this._disconnectedHook?.();
-            this._logStream.end();
             this._errorHook?.(new Error(
                 'WireGuard tunnel failed to start. Check the connection log for details.'
             ));
@@ -105,11 +102,11 @@ class WireGuard extends VpnBase {
 
     #uninstallTunnel(wgExe) {
         return new Promise(resolve => {
-            const proc = cp.spawn(wgExe, ['/uninstalltunnel', this.#tunnelName], { shell: false });
+            const proc = cp.spawn(wgExe, ['/uninstalltunnelservice', this.#tunnelName], { shell: false });
             proc.stdout?.pipe(this._logStream, { end: false });
             proc.stderr?.pipe(this._logStream, { end: false });
             proc.on('close', code => {
-                this._logStream.write(`wireguard /uninstalltunnel exit: ${code}\n`);
+                this._logStream.write(`wireguard /uninstalltunnelservice exit: ${code}\n`);
                 resolve(code);
             });
             proc.on('error', () => resolve(-1));

@@ -37,7 +37,8 @@ const WireGuardDetails = observer(() => {
             setStatusType('error');
             return;
         }
-        if (!serverHost) {
+        const isShared = profile.serverType === 'shared';
+        if (isShared && !serverHost) {
             setStatus('Select a server in the Profile tab first.');
             setStatusType('error');
             return;
@@ -51,7 +52,7 @@ const WireGuardDetails = observer(() => {
                 username: login,
                 password,
                 server_type: profile.serverType,
-                server: serverHost,
+                ...(profile.serverType === 'shared' && serverHost ? { server: serverHost } : {}),
             });
 
             const response = await axios.post(WG_AUTH_URL, params.toString(), {

@@ -2,7 +2,7 @@ import { makeAutoObservable } from 'mobx';
 import { VpnType } from '@modules/constants.js';
 
 class SettingsStore {
-    vpnType = VpnType.OpenVPN.label;
+    vpnType = VpnType.WireGuard.label;
     profileId = '';
     isModalOpen = false;
     autoConnect = false;

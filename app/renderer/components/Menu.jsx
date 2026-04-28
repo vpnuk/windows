@@ -66,7 +66,8 @@ const Menu = observer(() => {
                 <TabPane tab="Config" key="config">
                     <ConfigEditor
                         vpnType={store.settings.vpnType}
-                        profileId={store.profiles.currentProfile.id} />
+                        profileId={store.profiles.currentProfile.id}
+                        serverHost={store.profiles.currentProfile.server?.host} />
                 </TabPane>
 
                 <TabPane tab="Log" key="log">

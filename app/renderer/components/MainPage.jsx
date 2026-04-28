@@ -26,7 +26,6 @@ const MainPage = observer(({ showDrawer }) => {
                     <img alt="vpnuk-shield" src={`${ShieldImage}`} />
                 </div>
                 <div className="column-block column-content_block">
-                    <div className="column-content_block-title">VPNUK</div>
                     <div className="column-content_block-subtitle">Secure & Private Connection</div>
                     <ConnectionSwitch />
                     <ValueSelector

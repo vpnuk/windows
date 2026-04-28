@@ -23,7 +23,7 @@ const writeFile = (path, content) => {
     }
 };
 
-const ConfigEditor = observer(({ vpnType, profileId }) => {
+const ConfigEditor = observer(({ vpnType, profileId, serverHost }) => {
     const isWireGuard = vpnType === VpnType.WireGuard.label;
     const isOpenVPN   = vpnType === VpnType.OpenVPN.label;
 
@@ -41,7 +41,7 @@ const ConfigEditor = observer(({ vpnType, profileId }) => {
 
     return isOpenVPN
         ? <OvpnConfigEditor />
-        : <WgConfigEditor profileId={profileId} />;
+        : <WgConfigEditor profileId={profileId} serverHost={serverHost} />;
 });
 
 const OvpnConfigEditor = () => {
@@ -112,17 +112,16 @@ const OvpnConfigEditor = () => {
     );
 };
 
-const WgConfigEditor = ({ profileId }) => {
+const WgConfigEditor = ({ profileId, serverHost }) => {
     const [content, setContent] = useState('');
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
-    const path = require('path');
     const confPath = profileId
-        ? path.join(settingsPath.folder, `wg-${profileId}.conf`)
+        ? settingsPath.wgConf(profileId, serverHost)
         : null;
 
     useEffect(() => {
-        if (confPath) setContent(readFile(confPath));
+        setContent(confPath ? readFile(confPath) : '');
     }, [confPath]);
 
     const handleSave = () => {
