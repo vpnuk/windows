@@ -67,6 +67,7 @@ const Menu = observer(() => {
                     <ConfigEditor
                         vpnType={store.settings.vpnType}
                         profileId={store.profiles.currentProfile.id}
+                        serverType={store.profiles.currentProfile.serverType}
                         serverDns={store.profiles.currentProfile.server?.dns}
                         reloadKey={store.profiles.currentProfile.wgConfigFetched} />
                 </TabPane>
