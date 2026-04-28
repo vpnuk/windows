@@ -493,7 +493,7 @@ FunctionEnd
             StrCpy $ovpnFlag "false"
         ${EndIf}
 
-    ; -------------- WireGuard (always shown) --------------
+    ; -------------- WireGuard (always shown, defaults to Yes) --------------
         ${NSD_CreateLabel} 0u 36u 100% 12u "Uninstall WireGuard"
         Pop $hwnd
 
@@ -502,14 +502,15 @@ FunctionEnd
         nsDialogs::SetUserData $hwnd "true"
         ${NSD_OnClick} $hwnd un.wgRadioClick
         ${NSD_AddStyle} $hwnd ${WS_GROUP}
+        StrCpy $wgHwnd $hwnd          ; save the "Yes" button handle
 
         ${NSD_CreateRadioButton} 12u 60u 100% 12u "No"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "false"
         ${NSD_OnClick} $hwnd un.wgRadioClick
 
-        ${NSD_Check} $hwnd
-        StrCpy $wgFlag "false"
+        ${NSD_Check} $wgHwnd          ; pre-select "Yes" by default
+        StrCpy $wgFlag "true"         ; initialise flag to match
 
     ; ------------- User data -------------
         ${NSD_CreateLabel} 0u 76u 100% 12u "Clear application user data"
