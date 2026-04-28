@@ -42,21 +42,43 @@ send:
 !define uninstallOvpn "!insertmacro uninstallOvpn"
 
 !macro uninstallWg
-    ; Try registry first, then fall back to known install paths
+    ; Step 1 — Stop any running VPNUK WireGuard tunnel services so the kernel
+    ; driver is not in use when the WireGuard uninstaller tries to remove it.
+    nsExec::ExecToStack 'cmd /c for /F "tokens=2 delims=$ " %S in ('"'"'sc query type= all state= all ^| findstr "WireGuardTunnel"'"'"') do sc stop "WireGuardTunnel$%S"'
+    Pop $0
+    Pop $0
+    Sleep 2000
+
+    ; Step 2 — Locate and run the WireGuard uninstaller.
+    ;
+    ; IMPORTANT: The registry UninstallString already contains the FULL command,
+    ; e.g.  C:\Program Files\WireGuard\wireguard.exe /uninstall
+    ; Execute it directly with nsExec::ExecToStack '$0' — do NOT add extra
+    ; quotes around $0 or append another /uninstall, both of which produce a
+    ; malformed command that silently fails and leaves WireGuard installed.
     ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\WireGuard" "UninstallString"
-    ${If} $0 == ""
-        IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" 0 +2
-        StrCpy $0 "$PROGRAMFILES64\WireGuard\wireguard.exe"
-        ${If} $0 == ""
-            IfFileExists "$PROGRAMFILES\WireGuard\wireguard.exe" 0 +2
-            StrCpy $0 "$PROGRAMFILES\WireGuard\wireguard.exe"
-        ${EndIf}
-    ${EndIf}
     ${If} $0 != ""
-        nsExec::ExecToStack '"$0" /uninstall'
+        ; Registry path — use the value verbatim.
+        nsExec::ExecToStack '$0'
         Pop $0
         Pop $0
         Sleep 3000
+    ${Else}
+        ; Registry entry missing — try known 64-bit then 32-bit install paths.
+        ; Use $1 so we do not clobber $0 (used as a scratch register by NSIS).
+        StrCpy $1 ""
+        IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" 0 +2
+        StrCpy $1 "$PROGRAMFILES64\WireGuard\wireguard.exe"
+        ${If} $1 == ""
+            IfFileExists "$PROGRAMFILES\WireGuard\wireguard.exe" 0 +2
+            StrCpy $1 "$PROGRAMFILES\WireGuard\wireguard.exe"
+        ${EndIf}
+        ${If} $1 != ""
+            nsExec::ExecToStack '"$1" /uninstall'
+            Pop $0
+            Pop $0
+            Sleep 3000
+        ${EndIf}
     ${EndIf}
 !macroend
 !define uninstallWg "!insertmacro uninstallWg"
