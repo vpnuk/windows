@@ -34,9 +34,10 @@ exports.settingsPath = {
     ovpnBinFolder: path.join(settingsFolder, 'ovpnBin/'),
     ovpnBinExe: path.join(settingsFolder, 'ovpnBin', 'bin', 'openvpn.exe'),
     ikev2Cert: path.join(settingsFolder, 'ikev2.crt'),
-    wgConf: (profileId, serverHost) => {
-        const slug = serverHost ? '-' + serverHost.replace(/[^a-zA-Z0-9._-]/g, '_') : '';
-        return path.join(settingsFolder, `wg-${profileId}${slug}.conf`);
+    wgConf: (profileId, serverDns) => {
+        // Use DNS slug as filename: shared32.vpnuk.net → shared32.conf
+        const slug = serverDns ? serverDns.replace(/\.vpnuk\.net$/i, '') : 'vpnuk-wg';
+        return path.join(settingsFolder, `${slug}.conf`);
     },
 };
 

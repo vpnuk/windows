@@ -23,7 +23,7 @@ const writeFile = (path, content) => {
     }
 };
 
-const ConfigEditor = observer(({ vpnType, profileId, serverHost }) => {
+const ConfigEditor = observer(({ vpnType, profileId, serverDns }) => {
     const isWireGuard = vpnType === VpnType.WireGuard.label;
     const isOpenVPN   = vpnType === VpnType.OpenVPN.label;
 
@@ -41,7 +41,7 @@ const ConfigEditor = observer(({ vpnType, profileId, serverHost }) => {
 
     return isOpenVPN
         ? <OvpnConfigEditor />
-        : <WgConfigEditor profileId={profileId} serverHost={serverHost} />;
+        : <WgConfigEditor profileId={profileId} serverDns={serverDns} />;
 });
 
 const OvpnConfigEditor = () => {
@@ -112,12 +112,12 @@ const OvpnConfigEditor = () => {
     );
 };
 
-const WgConfigEditor = ({ profileId, serverHost }) => {
+const WgConfigEditor = ({ profileId, serverDns }) => {
     const [content, setContent] = useState('');
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
     const confPath = profileId
-        ? settingsPath.wgConf(profileId, serverHost)
+        ? settingsPath.wgConf(profileId, serverDns)
         : null;
 
     useEffect(() => {
@@ -150,7 +150,7 @@ const WgConfigEditor = ({ profileId, serverHost }) => {
     return (
         <div className="config-editor-wrapper" style={{ paddingTop: 8 }}>
             <p style={{ color: '#6b8cad', fontSize: 12, margin: '0 0 8px' }}>
-                Editing: WireGuard configuration (.conf)
+                Editing: WireGuard configuration (.conf){serverDns ? ` for ${serverDns}` : ''}
             </p>
             <textarea
                 className="config-editor-textarea"
