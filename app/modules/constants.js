@@ -34,7 +34,10 @@ exports.settingsPath = {
     ovpnBinFolder: path.join(settingsFolder, 'ovpnBin/'),
     ovpnBinExe: path.join(settingsFolder, 'ovpnBin', 'bin', 'openvpn.exe'),
     ikev2Cert: path.join(settingsFolder, 'ikev2.crt'),
-    wgConf: profileId => path.join(settingsFolder, `wg-${profileId}.conf`),
+    wgConf: (profileId, serverHost) => {
+        const slug = serverHost ? '-' + serverHost.replace(/[^a-zA-Z0-9._-]/g, '_') : '';
+        return path.join(settingsFolder, `wg-${profileId}${slug}.conf`);
+    },
 };
 
 const baseAddress = 'https://www.serverlistvault.com/';
