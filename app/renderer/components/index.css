@@ -329,8 +329,7 @@
 
 /* ─── Server list (multi-row scrollable) ─────────────────────────────────── */
 .server-list {
-    height: 100%;
-    min-height: 120px;
+    height: 222px;   /* ~7 rows at ≈32px each — remainder scrolls */
     overflow-y: auto;
     background: var(--bg);
     border: 1px solid var(--border);
