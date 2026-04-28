@@ -84,19 +84,44 @@ switch ($action) {
 
         } else {
 
-            // ── Dedicated / 1:1 account: server is determined by the account record ──
-            // POST[server] is intentionally ignored — the assigned server cannot be
-            // overridden by the client, matching the web portal's security model.
+            // ── Dedicated / 1:1 account ─────────────────────────────────────────────
+            // Normally the config is for the user's assigned dedicated server.
+            // However, if the client requests a server IP that does not match their
+            // dedicated server, treat the request as shared (e.g. the user has switched
+            // to a shared server in the app while holding a dedicated account).
             if (empty($user->servers)) {
                 api_err('No server assigned to your account. Please contact support.');
             }
-            $srv_key = wg2_server_name_to_key($user->servers[0]->name);
-            $server  = wg2_get_server($srv_key);
-            if (!$server) api_err('Your assigned server was not found. Please contact support.');
-            if (!wg2_server_ready($server)) api_err('WireGuard is not yet available on your server. Please contact support.');
+            $ded_srv_key = wg2_server_name_to_key($user->servers[0]->name);
+            $ded_server  = wg2_get_server($ded_srv_key);
+            if (!$ded_server) api_err('Your assigned server was not found. Please contact support.');
 
-            $dedicated_ip = $user->dedicated_ip();
-            $max = $is_one2one ? 1 : max(1, (int) $user->allowed_sessions());
+            $server_host     = trim($_POST['server'] ?? '');
+            $ded_server_host = $ded_server['address'] ?? '';
+
+            if (!empty($server_host) && $server_host !== $ded_server_host) {
+                // Client is requesting a different server — serve a shared config
+                $srv_key = null;
+                $server  = null;
+                foreach (wg2_get_shared_servers() as $key => $s) {
+                    if (($s['address'] ?? '') === $server_host) {
+                        $srv_key = $key;
+                        $server  = $s;
+                        break;
+                    }
+                }
+                if (!$srv_key) api_err('Invalid server selected.');
+                if (!wg2_server_ready($server)) api_err('WireGuard is not yet available on this server. Please try another.');
+                $dedicated_ip = '';
+                $max          = min(10, max(1, (int) $user->allowed_sessions()));
+            } else {
+                // Serve the dedicated server config
+                if (!wg2_server_ready($ded_server)) api_err('WireGuard is not yet available on your server. Please contact support.');
+                $srv_key      = $ded_srv_key;
+                $server       = $ded_server;
+                $dedicated_ip = $user->dedicated_ip();
+                $max          = $is_one2one ? 1 : max(1, (int) $user->allowed_sessions());
+            }
         }
 
         // Each Windows installation sends a unique device_label (e.g. "win-a3f7b2c1")
