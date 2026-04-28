@@ -186,32 +186,20 @@ const ensureWgConfig = async (profile, onStatus) => {
 
     logToFile(profileId, `[wgApi] existingEndpointIp=${existingEndpointIp || '(none)'}  serverChanged=${serverChanged}`);
 
-    // Dedicated/1:1 servers: ALWAYS fetch a fresh config before every connect.
-    // The WireGuard peer entry on the server can be cleared or rotated at any time
-    // (reboot, key rotation, server maintenance). Reusing a cached config causes a
-    // silent handshake failure — the tunnel installs (exit 0) but never routes
-    // traffic because the server no longer recognises the client's public key.
-    // For shared servers the 24-hour staleness window is sufficient.
-    let dedicatedStale = isDedicated; // dedicated = always stale (always re-fetch)
-    if (!isDedicated && confExists) {
-        try {
-            const ageH     = (Date.now() - fs.statSync(confPath).mtimeMs) / 3600000;
-            dedicatedStale = ageH > 24;
-            logToFile(profileId, `[wgApi] shared conf age: ${ageH.toFixed(1)} h  stale=${dedicatedStale}`);
-        } catch { /* ignore */ }
-    }
-    if (isDedicated) {
-        logToFile(profileId, `[wgApi] dedicated/1:1 — always fetching fresh config`);
-    }
-
-    const needsFetch = !confExists || serverChanged || dedicatedStale;
-    logToFile(profileId, `[wgApi] needsFetch=${needsFetch} (noConf=${!confExists} serverChanged=${serverChanged} stale=${dedicatedStale})`);
-
-    if (!needsFetch) {
-        logToFile(profileId, `[wgApi] Config is current — skipping fetch`);
-        if (typeof onStatus === 'function') onStatus('');
-        return { success: true };
-    }
+    // Always fetch a fresh config before every connect for ALL server types.
+    //
+    // Reusing a cached .conf causes a silent handshake failure when the server-side
+    // peer entry has been cleared or rotated since the config was written (server
+    // reboot, slot reallocation, key rotation, etc.).  In that case WireGuard
+    // installs the tunnel (exit 0) but the server no longer recognises the client's
+    // public key, so the handshake never completes and no traffic is routed.
+    //
+    // The fetch adds ~300–500 ms per connect, which is acceptable.  The cached file
+    // is kept on disk as a fallback — if the API is unreachable we still attempt
+    // the connect with whatever keys we have.
+    logToFile(profileId, `[wgApi] always fetching fresh config before connect`);
+    const needsFetch = true;
+    logToFile(profileId, `[wgApi] needsFetch=true (confExists=${confExists} serverChanged=${serverChanged})`);
 
     // Release old server config slot when switching servers.
     // For dedicated accounts using shared servers: the PHP now correctly targets
