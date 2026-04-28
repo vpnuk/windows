@@ -6,7 +6,7 @@ import ReactCountryFlag from 'react-country-flag';
 import '@components/index.css';
 import { ValueSelector } from '@components';
 import { Servers, useStore } from '@domain';
-import { settingsPath, VpnType } from '@modules/constants.js';
+import { settingsPath, wgConfSlug, VpnType } from '@modules/constants.js';
 
 const fs = require('fs');
 
@@ -37,11 +37,15 @@ const formatServerOption = option => (
 const WireGuardConfigStatus = observer(({ profile }) => {
     const serverDns = profile.server?.dns || '';
     void profile.wgConfigFetched;
-    const confPath = serverDns ? settingsPath.wgConf(profile.id, serverDns) : null;
+    // Use the shared slug function so the path always matches what WireGuardDetails writes.
+    const confPath = settingsPath.wgConf(profile.serverType, serverDns);
     let hasConfig = false;
-    try { hasConfig = confPath ? fs.existsSync(confPath) : false; } catch { }
+    try { hasConfig = fs.existsSync(confPath); } catch { }
 
-    if (!serverDns) return null;
+    // For dedicated accounts the conf exists as soon as it has been fetched once;
+    // no server selection is required, so always show the status line.
+    const isDedicated = profile.serverType === 'dedicated' || profile.serverType === 'dedicated11';
+    if (!serverDns && !isDedicated) return null;
 
     return hasConfig ? (
         <p style={{ margin: '8px 0 0', fontSize: 12, color: '#1aceb8' }}>
