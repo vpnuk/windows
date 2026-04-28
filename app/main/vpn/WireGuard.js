@@ -1,7 +1,7 @@
 const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { connectionStates, settingsPath } = require('../../modules/constants');
+const { connectionStates, settingsPath, wgConfSlug } = require('../../modules/constants');
 const VpnBase = require('./VpnBase');
 
 const isDev = process.env.ELECTRON_ENV === 'Dev';
@@ -97,8 +97,8 @@ class WireGuard extends VpnBase {
 
     constructor(profile, hooks) {
         super(profile, hooks);
-        // Use server DNS name (shared32.vpnuk.net → shared32.conf)
-        this.#confPath         = settingsPath.wgConf(profile.id, profile.server?.dns);
+        // Use the shared slug rule: dedicated/1:1 → dedicated.conf, shared → <server>.conf
+        this.#confPath         = settingsPath.wgConf(profile.serverType, profile.server?.dns);
         this.#tunnelName       = path.basename(this.#confPath, '.conf');
         this.#connectionStatus = connectionStates.disconnected;
     }
