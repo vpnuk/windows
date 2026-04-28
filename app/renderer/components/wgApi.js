@@ -12,9 +12,19 @@
  *   5. Reports progress via an optional onStatus(msg) callback
  */
 
-const axios        = require('axios');
-const fs           = require('fs');
+const axios            = require('axios');
+const fs               = require('fs');
+const { ipcRenderer }  = require('electron');
 const { settingsPath } = require('@modules/constants.js');
+
+// ── Log to the profile's log file via the main process ───────────────────────
+// This appends renderer-side diagnostic lines (config fetch, IP check, etc.)
+// into the same .log file that WireGuard/OpenVPN use, so every troubleshooting
+// session is in one place.
+const logToFile = (profileId, line) => {
+    if (!profileId) return;
+    try { ipcRenderer.send('log-append', { profileId, line }); } catch { /* best-effort */ }
+};
 
 const WG_AUTH_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wg_v2_app_api.php';
 
@@ -35,6 +45,14 @@ const getDeviceLabel = () => {
 };
 
 // ── Conf-string helpers ───────────────────────────────────────────────────────
+
+// Extract the [Interface] Address IP from a .conf file string.
+const getConfInterfaceIp = confContent => {
+    try {
+        const match = confContent.match(/^\[Interface\][\s\S]*?^Address\s*=\s*([\d.]+)/m);
+        return match ? match[1] : null;
+    } catch { return null; }
+};
 
 // Patch Endpoint hostname → IP so WireGuard never needs DNS on connect.
 const patchEndpointToIp = (conf, serverIp) => {
@@ -125,31 +143,48 @@ const deleteWgConfig = async ({ login, password, serverHost }) => {
  * onStatus(msg) is called at each step for UI progress feedback.
  */
 const ensureWgConfig = async (profile, onStatus) => {
-    const report = typeof onStatus === 'function' ? onStatus : () => {};
+    const profileId = profile.id || '';
+    const log = (msg) => {
+        if (typeof onStatus === 'function' && msg) onStatus(msg);
+        logToFile(profileId, `[wgApi] ${msg}`);
+    };
 
-    report('Checking credentials\u2026');
+    log('Checking credentials\u2026');
 
     const { login, password } = profile.credentials || {};
     if (!login || !password) {
-        return { success: false, error: 'Enter your username and password in the Profile tab first.' };
+        const err = 'Enter your username and password in the Profile tab first.';
+        logToFile(profileId, `[wgApi] ERROR: ${err}`);
+        return { success: false, error: err };
     }
+    logToFile(profileId, `[wgApi] login: ${login}`);
 
     const serverHost  = (profile.server && profile.server.host) || '';
+    const serverLabel = (profile.server && profile.server.label) || '(none)';
     const serverType  = profile.serverType || 'shared';
     const isDedicated = serverType === 'dedicated' || serverType === 'dedicated11';
     const mtuValue    = (profile.details && profile.details.mtu && profile.details.mtu.value) || '';
 
+    logToFile(profileId, `[wgApi] serverType=${serverType}  isDedicated=${isDedicated}`);
+    logToFile(profileId, `[wgApi] server="${serverLabel}"  host=${serverHost || '(using dedicated)'}`);
+    logToFile(profileId, `[wgApi] MTU=${mtuValue || '(auto)'}`);
+
     if (!serverHost && !isDedicated) {
-        return { success: false, error: 'Select a server in the Profile tab first.' };
+        const err = 'Select a server in the Profile tab first.';
+        logToFile(profileId, `[wgApi] ERROR: ${err}`);
+        return { success: false, error: err };
     }
 
-    report('Checking configuration\u2026');
+    log('Checking local config\u2026');
 
     const confPath   = settingsPath.wgConf(serverType, null);
     const confExists = fs.existsSync(confPath);
+    logToFile(profileId, `[wgApi] confPath=${confPath}  exists=${confExists}`);
 
     const existingEndpointIp = confExists ? getConfEndpointIp(confPath) : null;
     const serverChanged      = confExists && existingEndpointIp && serverHost && existingEndpointIp !== serverHost;
+
+    logToFile(profileId, `[wgApi] existingEndpointIp=${existingEndpointIp || '(none)'}  serverChanged=${serverChanged}`);
 
     // Re-check dedicated/1:1 IPs once a day to catch assigned-IP rotations.
     let dedicatedStale = false;
@@ -157,29 +192,81 @@ const ensureWgConfig = async (profile, onStatus) => {
         try {
             const ageH     = (Date.now() - fs.statSync(confPath).mtimeMs) / 3600000;
             dedicatedStale = ageH > 24;
+            logToFile(profileId, `[wgApi] dedicated conf age: ${ageH.toFixed(1)} h  stale=${dedicatedStale}`);
         } catch { /* ignore */ }
     }
 
     const needsFetch = !confExists || serverChanged || dedicatedStale;
+    logToFile(profileId, `[wgApi] needsFetch=${needsFetch} (noConf=${!confExists} serverChanged=${serverChanged} stale=${dedicatedStale})`);
 
     if (!needsFetch) {
-        report('');
+        logToFile(profileId, `[wgApi] Config is current — skipping fetch`);
+        if (typeof onStatus === 'function') onStatus('');
         return { success: true };
     }
 
-    // Release old server config slot when switching shared servers.
-    if (serverChanged && !isDedicated && existingEndpointIp) {
-        report('Releasing old server config\u2026');
+    // Release old server config slot when switching servers.
+    // For dedicated accounts using shared servers: the PHP now correctly targets
+    // the shared server slot when server= matches a shared IP.
+    if (serverChanged && existingEndpointIp) {
+        log(`Releasing slot on old server (${existingEndpointIp})\u2026`);
+        logToFile(profileId, `[wgApi] Calling delete_config for old endpoint: ${existingEndpointIp}`);
         await deleteWgConfig({ login, password, serverHost: existingEndpointIp });
+        logToFile(profileId, `[wgApi] delete_config done`);
     }
 
-    const verb = !confExists ? 'Generating' : 'Refreshing';
-    report(verb + ' WireGuard config\u2026');
+    const verb = !confExists ? 'Requesting' : 'Refreshing';
+    log(`${verb} WireGuard config for "${serverLabel}"\u2026`);
+    logToFile(profileId, `[wgApi] Calling get_config  server=${serverHost || '(dedicated)'}`);
 
     const result = await fetchWgConfig({ login, password, serverHost, mtuValue, confPath });
 
-    if (result.success) report('');
-    return result;
+    if (!result.success) {
+        logToFile(profileId, `[wgApi] get_config FAILED: ${result.error}`);
+        return result;
+    }
+    logToFile(profileId, `[wgApi] get_config OK — conf written to ${confPath}`);
+
+    // ── Internal IP uniqueness check ──────────────────────────────────────────
+    // Each active WireGuard tunnel on Windows must use a unique internal IP.
+    // If two .conf files share the same Address, Windows refuses the second tunnel.
+    // When a clash is found: free the conflicting slot and regenerate.
+    try {
+        const newConf  = fs.readFileSync(confPath, 'utf-8');
+        const newIp    = getConfInterfaceIp(newConf);
+        logToFile(profileId, `[wgApi] New conf internal IP: ${newIp || '(not found)'}`);
+
+        const allTypes = ['shared', 'dedicated', 'dedicated11'];
+        const others   = allTypes.filter(t => t !== serverType);
+
+        for (const otherType of others) {
+            const otherPath = settingsPath.wgConf(otherType, null);
+            if (!fs.existsSync(otherPath)) continue;
+            try {
+                const otherConf = fs.readFileSync(otherPath, 'utf-8');
+                const otherIp   = getConfInterfaceIp(otherConf);
+                logToFile(profileId, `[wgApi] Other conf (${otherType}) internal IP: ${otherIp || '(not found)'}`);
+                if (newIp && otherIp && newIp === otherIp) {
+                    log(`Resolving internal IP conflict (${newIp})\u2026`);
+                    logToFile(profileId, `[wgApi] IP CONFLICT with ${otherType} conf — deleting and regenerating`);
+                    await deleteWgConfig({ login, password, serverHost });
+                    logToFile(profileId, `[wgApi] delete_config done (conflict resolution)`);
+                    const fresh = await fetchWgConfig({ login, password, serverHost, mtuValue, confPath });
+                    if (!fresh.success) {
+                        logToFile(profileId, `[wgApi] Regeneration FAILED: ${fresh.error}`);
+                        return fresh;
+                    }
+                    const resolvedConf = fs.readFileSync(confPath, 'utf-8');
+                    logToFile(profileId, `[wgApi] Regenerated conf internal IP: ${getConfInterfaceIp(resolvedConf) || '(not found)'}`);
+                    break;
+                }
+            } catch { /* skip unreadable conf files */ }
+        }
+    } catch { /* IP check is best-effort */ }
+
+    logToFile(profileId, `[wgApi] Config ready — proceeding to connect`);
+    if (typeof onStatus === 'function') onStatus('');
+    return { success: true };
 };
 
 module.exports = {
