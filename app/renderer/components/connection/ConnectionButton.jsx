@@ -4,7 +4,8 @@ import { toJS }           from 'mobx';
 import { observer }       from 'mobx-react-lite';
 import { connectionStates, VpnType } from '@modules/constants.js';
 import { ConnectionStore, useStore, WvpnOptions } from '@domain';
-import { ensureWgConfig } from '@components/wgApi.js';
+
+const { ensureWgConfig } = require('@components/wgApi.js');
 
 const ConnectionButton = observer(() => {
     const profile = useStore().profiles.currentProfile;
