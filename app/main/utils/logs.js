@@ -17,6 +17,19 @@ const getLogFileStream = id => {
 };
 exports.getLogFileStream = getLogFileStream;
 
+/**
+ * Append a single line to a profile's log file synchronously.
+ * Used by the `log-append` IPC handler so the renderer can write
+ * diagnostic lines (wgApi steps, credential errors, etc.) into the
+ * same log file that WireGuard/OpenVPN use.
+ */
+const appendToLog = (id, line) => {
+    mkdirIfNotExistsSync(logDir);
+    const ts = new Date().toISOString();
+    fs.appendFileSync(getLogPath(id), `[${ts}] ${line}\n`, 'utf-8');
+};
+exports.appendToLog = appendToLog;
+
 const openLogFileExternal = id => {
     const logPath = getLogPath(id);
 
