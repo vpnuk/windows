@@ -69,9 +69,15 @@ const WireGuardDetails = observer(() => {
     const serverDns  = profile.server?.dns  || '';
     const serverHost = profile.server?.host || '';     // IP address
     const isShared   = profile.serverType === 'shared';
+    const isDedicated = profile.serverType === 'dedicated' || profile.serverType === 'dedicated11';
 
-    // Config file path (DNS slug: shared32.vpnuk.net → shared32.conf)
-    const confPath  = settingsPath.wgConf(profile.id, serverDns);
+    // For dedicated/1:1 accounts the server ALWAYS returns the config for the
+    // account's assigned server regardless of what server is selected in the UI.
+    // Use a fixed slug so there is only ever ONE conf file for dedicated accounts
+    // and switching the profile server picker never creates duplicate identical files.
+    // For shared accounts, use the server DNS slug so each server gets its own file.
+    const confSlug  = isDedicated ? 'dedicated' : serverDns;
+    const confPath  = settingsPath.wgConf(profile.id, confSlug);
     const confName  = path.basename(confPath);
     const confDir   = path.dirname(confPath);
     const log       = makeLogAppender(confPath);
@@ -79,7 +85,7 @@ const WireGuardDetails = observer(() => {
     useEffect(() => {
         setStatus('');
         setStatusType('');
-    }, [profile.id, serverDns]);
+    }, [profile.id, confSlug]);
 
     const configExists = () => {
         try { return fs.existsSync(confPath); }
@@ -107,6 +113,7 @@ const WireGuardDetails = observer(() => {
         log(profile.id, `serverType : ${profile.serverType}`);
         log(profile.id, `serverDns  : ${serverDns}`);
         log(profile.id, `serverHost : ${serverHost}`);
+        log(profile.id, `confSlug   : ${confSlug}  (dedicated accounts always use "dedicated.conf")`);
         log(profile.id, `confPath   : ${confPath}`);
 
         // For shared accounts the API uses server (IP) to select the right server.
