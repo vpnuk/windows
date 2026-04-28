@@ -3,7 +3,7 @@ import { action } from 'mobx';
 import { observer } from 'mobx-react-lite';
 import { Checkbox, Switch } from 'antd';
 import '@components/index.css';
-import { optionsMtu, VpnType } from '@modules/constants.js';
+import { optionsMtu } from '@modules/constants.js';
 import { ValueSelector } from '@components';
 import { Dns, useStore } from '@domain';
 
