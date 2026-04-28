@@ -3,7 +3,7 @@ import { observer } from 'mobx-react-lite';
 import { action } from 'mobx';
 import '@components/index.css';
 import { useStore } from '@domain';
-import { settingsPath } from '@modules/constants.js';
+import { settingsPath, wgConfSlug } from '@modules/constants.js';
 
 const axios        = require('axios');
 const fs           = require('fs');
@@ -68,16 +68,13 @@ const WireGuardDetails = observer(() => {
 
     const serverDns  = profile.server?.dns  || '';
     const serverHost = profile.server?.host || '';     // IP address
-    const isShared   = profile.serverType === 'shared';
-    const isDedicated = profile.serverType === 'dedicated' || profile.serverType === 'dedicated11';
+    const isShared  = profile.serverType === 'shared';
 
-    // For dedicated/1:1 accounts the server ALWAYS returns the config for the
-    // account's assigned server regardless of what server is selected in the UI.
-    // Use a fixed slug so there is only ever ONE conf file for dedicated accounts
-    // and switching the profile server picker never creates duplicate identical files.
-    // For shared accounts, use the server DNS slug so each server gets its own file.
-    const confSlug  = isDedicated ? 'dedicated' : serverDns;
-    const confPath  = settingsPath.wgConf(profile.id, confSlug);
+    // wgConfSlug centralises the naming rule: dedicated/1:1 → always 'dedicated',
+    // shared → DNS slug per server.  Every component imports and uses the same
+    // function so they all resolve to the same path.
+    const confSlug  = wgConfSlug(profile.serverType, serverDns);
+    const confPath  = settingsPath.wgConf(profile.serverType, serverDns);
     const confName  = path.basename(confPath);
     const confDir   = path.dirname(confPath);
     const log       = makeLogAppender(confPath);
