@@ -11,6 +11,26 @@ const path  = require('path');
 
 const WG_AUTH_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wg_v2_app_api.php';
 
+// Return a persistent per-installation device label such as "win-a3f7b2c1".
+// The label is generated once, written to %APPDATA%\VPNUK\device.json, and
+// reused on every subsequent fetch — so this installation always maps to the
+// same keypair and internal IP on the server, and never collides with another
+// device belonging to the same account.
+const getDeviceLabel = () => {
+    try {
+        if (fs.existsSync(settingsPath.device)) {
+            const data = JSON.parse(fs.readFileSync(settingsPath.device, 'utf-8'));
+            if (typeof data.label === 'string' && data.label.length > 0) return data.label;
+        }
+    } catch { /* ignore corrupt file — regenerate below */ }
+
+    // Generate: "win-" + 8 random lowercase hex chars
+    const hex   = Array.from({ length: 8 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    const label = `win-${hex}`;
+    try { fs.writeFileSync(settingsPath.device, JSON.stringify({ label }), 'utf-8'); } catch { /* best-effort */ }
+    return label;
+};
+
 // Write to the profile's VPN log file so it appears in the LOG tab.
 // vpnuk-wg.conf lives in settingsFolder; logs/ is a sibling directory.
 const makeLogAppender = confPath => (profileId, msg) => {
@@ -89,14 +109,21 @@ const WireGuardDetails = observer(() => {
         // For shared accounts the API uses server (IP) to select the right server.
         // For dedicated/1:1 accounts the API ignores this param and uses the server
         // assigned to the account record — sending the IP is harmless.
+        //
+        // device_label is a persistent per-installation identifier (e.g. "win-a3f7b2c1").
+        // The server uses it to look up — or create — a config exclusively for this
+        // device, so two machines on the same account NEVER share a keypair or
+        // internal IP address.
+        const deviceLabel = getDeviceLabel();
         const body = {
-            action:   'get_config',
-            username: login,
+            action:       'get_config',
+            username:     login,
             password,
-            server:   serverHost,
+            server:       serverHost,
+            device_label: deviceLabel,
         };
 
-        log(profile.id, `POST server="${serverHost}"`);
+        log(profile.id, `POST server="${serverHost}" device_label="${deviceLabel}"`);
 
         try {
             const params   = new URLSearchParams(body);
