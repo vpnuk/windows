@@ -9,7 +9,7 @@ const {
     checkWireGuardInstalled,
     installWireGuard
 } = require('./vpn');
-const { openLogFileExternal } = require('./utils/logs');
+const { openLogFileExternal, appendToLog } = require('./utils/logs');
 const {
     getDefaultGateway,
     defaultRoute,
@@ -84,11 +84,25 @@ ipcMain.on('connection-start', async (event, args) => {
     isDev && console.log('connection-start', args);
     const { profile, gateway, wVpnOptions } = args;
     const { tray } = require('./main');
+    const pid = profile.id || 'default';
+    const ts  = () => new Date().toISOString();
+
+    appendToLog(pid, `=== Connection Start ===`);
+    appendToLog(pid, `profileName  : ${profile.name || '(unnamed)'}`);
+    appendToLog(pid, `vpnType      : ${profile.vpnType}`);
+    appendToLog(pid, `serverType   : ${profile.serverType}`);
+    appendToLog(pid, `server.label : ${profile.server?.label || '(none)'}`);
+    appendToLog(pid, `server.host  : ${profile.server?.host  || '(none)'}`);
+    appendToLog(pid, `server.dns   : ${profile.server?.dns   || '(none)'}`);
+    appendToLog(pid, `killSwitch   : ${profile.killSwitchEnabled ? 'ON' : 'off'}`);
+    appendToLog(pid, `gateway      : ${gateway || '(unknown)'}`);
 
     vpnConnection = createVpn(profile, {
         connectedHook: async () => {
+            appendToLog(pid, `Hook: connected to ${profile.server?.label}`);
             if (profile.killSwitchEnabled) {
                 deleteRouteSync(defaultRoute, gateway).trim();
+                appendToLog(pid, `Kill-switch: default route removed`);
             }
             // Mark connected immediately so the UI responds without waiting for the IP lookup.
             event.sender.send('connection-changed', connectionStates.connected);
@@ -99,11 +113,14 @@ ipcMain.on('connection-start', async (event, args) => {
             // Wait 3 s for routing to stabilise, then do the lookup through the tunnel.
             await new Promise(r => setTimeout(r, 3000));
             const ip = await publicIp.v4({ timeout: 10000 }).catch(() => null);
+            appendToLog(pid, `Public IP after connect: ${ip || '(lookup failed)'}`);
             if (ip) {
                 tray.setConnectedState(`Connected to ${profile.server.label}\nYour IP: ${ip}`);
+                event.sender.send('vpn-ip-update', ip);
             }
         },
         disconnectedHook: () => {
+            appendToLog(pid, `Hook: disconnected`);
             try {
                 event.sender.send('connection-changed', connectionStates.disconnected);
             } catch (error) {
@@ -112,14 +129,17 @@ ipcMain.on('connection-start', async (event, args) => {
             tray.setDisconnectedState('Disconnected');
             if (profile.killSwitchEnabled) {
                 addRouteSync(defaultRoute, gateway, defaultRoute).trim();
+                appendToLog(pid, `Kill-switch: default route restored`);
             }
             deleteRouteSync(profile.server.host, gateway).trim();
         },
         connectingHook: () => {
+            appendToLog(pid, `Hook: connecting...`);
             event.sender.send('connection-changed', connectionStates.connecting);
             tray.setConnectingState(`Connecting to ${profile.server.label}...`);
         },
         errorHook: error => {
+            appendToLog(pid, `Hook: ERROR — ${error.message}`);
             sendNotification(event.sender, {
                 type: 'error',
                 title: 'Connection Error',
@@ -140,6 +160,13 @@ ipcMain.on('connection-stop', async () => {
 
 ipcMain.on('is-dev-request', event => {
     event.sender.send('is-dev-response', isDev);
+});
+
+// Allow the renderer process (wgApi, ConnectionButton) to append diagnostic
+// lines into the same log file that WireGuard / OpenVPN write to.
+ipcMain.on('log-append', (_, { profileId, line }) => {
+    if (!profileId || !line) return;
+    try { appendToLog(profileId, line); } catch { /* best-effort */ }
 });
 
 ipcMain.on('log-open', (event, profileId) => {
