@@ -98,6 +98,28 @@ if (gotTheLock) {
     })
 
     app.on('ready', () => {
+        // Clean up any WireGuard tunnel services left over from a previous
+        // session (crash, force-close, etc.) before the UI loads.
+        try {
+            const { cleanupOrphanedTunnels } = require('./vpn/WireGuard');
+            const { checkWireGuardInstalled } = require('./vpn/WireGuard');
+            if (checkWireGuardInstalled()) {
+                const cp   = require('child_process');
+                const path = require('path');
+                const regResult = cp.spawnSync(
+                    'cmd',
+                    ['/c', 'reg', 'query', 'HKLM\\SOFTWARE\\WireGuard', '/v', 'InstallationDirectory'],
+                    { shell: true }
+                );
+                const out   = '' + regResult.stdout;
+                const match = out.match(/InstallationDirectory\s+REG_SZ\s+(.+)/);
+                const wgExe = match
+                    ? path.join(match[1].trim(), 'wireguard.exe')
+                    : 'C:\\Program Files\\WireGuard\\wireguard.exe';
+                cleanupOrphanedTunnels(wgExe);
+            }
+        } catch { /* best-effort */ }
+
         createWindow();
         tray = new AppTray(() => window.focus());
         exports.tray = tray;

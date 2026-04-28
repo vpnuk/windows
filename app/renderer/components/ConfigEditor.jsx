@@ -23,7 +23,7 @@ const writeFile = (path, content) => {
     }
 };
 
-const ConfigEditor = observer(({ vpnType, profileId, serverDns }) => {
+const ConfigEditor = observer(({ vpnType, profileId, serverDns, reloadKey }) => {
     const isWireGuard = vpnType === VpnType.WireGuard.label;
     const isOpenVPN   = vpnType === VpnType.OpenVPN.label;
 
@@ -41,7 +41,7 @@ const ConfigEditor = observer(({ vpnType, profileId, serverDns }) => {
 
     return isOpenVPN
         ? <OvpnConfigEditor />
-        : <WgConfigEditor profileId={profileId} serverDns={serverDns} />;
+        : <WgConfigEditor profileId={profileId} serverDns={serverDns} reloadKey={reloadKey} />;
 });
 
 const OvpnConfigEditor = () => {
@@ -112,7 +112,7 @@ const OvpnConfigEditor = () => {
     );
 };
 
-const WgConfigEditor = ({ profileId, serverDns }) => {
+const WgConfigEditor = ({ profileId, serverDns, reloadKey }) => {
     const [content, setContent] = useState('');
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
@@ -120,9 +120,12 @@ const WgConfigEditor = ({ profileId, serverDns }) => {
         ? settingsPath.wgConf(profileId, serverDns)
         : null;
 
+    // reloadKey changes every time a config is fetched or cleared, so the
+    // textarea re-reads the file from disk automatically without the user
+    // needing to switch tabs.
     useEffect(() => {
         setContent(confPath ? readFile(confPath) : '');
-    }, [confPath]);
+    }, [confPath, reloadKey]);
 
     const handleSave = () => {
         if (!confPath) return setError('No WireGuard config for this profile.');

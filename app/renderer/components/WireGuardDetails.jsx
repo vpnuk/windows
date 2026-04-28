@@ -70,12 +70,7 @@ const WireGuardDetails = observer(() => {
             setStatusType('error');
             return;
         }
-        if (isShared && !serverHost) {
-            setStatus('Select a server in the Profile tab first.');
-            setStatusType('error');
-            return;
-        }
-        if (!isShared && !serverDns) {
+        if (!serverHost) {
             setStatus('No server assigned to this profile. Check the Profile tab.');
             setStatusType('error');
             return;
@@ -85,18 +80,24 @@ const WireGuardDetails = observer(() => {
         setStatus('Fetching WireGuard configuration...');
         setStatusType('');
 
-        // --- Build API params ---
-        // Shared: server = IP (proven working)
-        // Dedicated / 1:1: no server param — API returns error for shared only
-        const body = { action: 'get_config', username: login, password, server_type: profile.serverType };
-        if (isShared) body.server = serverHost;
+        // Always send server=<IP> for every account type.
+        // Shared accounts need it to select the shared server.
+        // Dedicated/1:1 accounts also need it — the API returns HTTP 400
+        // ("Server address required") when it is omitted, regardless of account type.
+        const body = {
+            action:      'get_config',
+            username:    login,
+            password,
+            server_type: profile.serverType,
+            server:      serverHost,
+        };
 
         log(profile.id, `=== WireGuard Config Fetch ===`);
         log(profile.id, `serverType : ${profile.serverType}`);
         log(profile.id, `serverDns  : ${serverDns}`);
         log(profile.id, `serverHost : ${serverHost}`);
         log(profile.id, `confPath   : ${confPath}`);
-        log(profile.id, `API params : action=get_config username=${login} server_type=${profile.serverType}${isShared ? ` server=${serverHost}` : ''}`);
+        log(profile.id, `API params : action=get_config username=${login} server_type=${profile.serverType} server=${serverHost}`);
 
         try {
             const params = new URLSearchParams(body);
