@@ -13,8 +13,9 @@ const Sidebar = observer(({ visible, setVisible }) =>
         visible={visible}
         width={522}
         closable
-        headerStyle={{ background: '#0d1422', borderBottom: '1px solid #1e2d4a' }}
-        drawerStyle={{ background: '#0d1422' }}>
+        headerStyle={{ background: '#0d1422', borderBottom: '1px solid #1e2d4a', padding: '12px 16px' }}
+        drawerStyle={{ background: '#0d1422' }}
+        bodyStyle={{ padding: '14px 16px', overflowX: 'hidden' }}>
 
         <Menu />
     </Drawer>
