@@ -24,7 +24,7 @@ const makeLogAppender = confPath => (profileId, msg) => {
 };
 
 // Replace the Endpoint hostname with the server IP in a WireGuard conf
-const useIpEndpoint = (conf, serverIp) => {
+const patchEndpointToIp = (conf, serverIp) => {
     if (!conf || !serverIp) return conf;
     return conf.replace(
         /^(Endpoint\s*=\s*)([a-zA-Z0-9._-]+)(\s*:\s*\d+)/m,
@@ -118,7 +118,7 @@ const WireGuardDetails = observer(() => {
             } else if (response.data?.config) {
                 // Post-process: replace hostname in Endpoint with the server IP
                 const rawConf    = response.data.config;
-                const patchedConf = useIpEndpoint(rawConf, serverHost);
+                const patchedConf = patchEndpointToIp(rawConf, serverHost);
 
                 const endpointRaw     = (rawConf.match(/^Endpoint\s*=.+/m)     || [''])[0];
                 const endpointPatched = (patchedConf.match(/^Endpoint\s*=.+/m) || [''])[0];
