@@ -6,6 +6,9 @@ import ReactCountryFlag from 'react-country-flag';
 import '@components/index.css';
 import { ValueSelector } from '@components';
 import { Servers, useStore } from '@domain';
+import { settingsPath, VpnType } from '@modules/constants.js';
+
+const fs = require('fs');
 
 const toIso = code => (code === 'UK' ? 'GB' : (code || '').toUpperCase());
 
@@ -31,8 +34,30 @@ const formatServerOption = option => (
     </div>
 );
 
+const WireGuardConfigStatus = observer(({ profile }) => {
+    const serverHost = profile.server?.host || '';
+    void profile.wgConfigFetched;
+    const confPath = serverHost ? settingsPath.wgConf(profile.id, serverHost) : null;
+    let hasConfig = false;
+    try { hasConfig = confPath ? fs.existsSync(confPath) : false; } catch { }
+
+    if (!serverHost) return null;
+
+    return hasConfig ? (
+        <p style={{ margin: '8px 0 0', fontSize: 12, color: '#1aceb8' }}>
+            ✓ WireGuard config ready for this server
+        </p>
+    ) : (
+        <p style={{ margin: '8px 0 0', fontSize: 12, color: '#e6a817' }}>
+            No WireGuard config for this server — go to the Connection tab to fetch one
+        </p>
+    );
+});
+
 const ServerSelector = observer(() => {
     const profile = useStore().profiles.currentProfile;
+    const isWireGuard = profile.vpnType === VpnType.WireGuard.label;
+
     useEffect(() => {
         let catalog = Servers.getCatalog(profile.serverType);
         if (!profile.server.host && catalog.length > 0) {
@@ -63,6 +88,8 @@ const ServerSelector = observer(() => {
             value={profile.server}
             formatOptionLabel={formatServerOption}
             onChange={action(value => profile.server = value)} />
+
+        {isWireGuard && <WireGuardConfigStatus profile={profile} />}
     </>
 });
 
