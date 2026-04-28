@@ -34,6 +34,7 @@ export const selectOptionColors = {
     }),
     singleValue: provided => ({ ...provided, color: text }),
     placeholder: provided => ({ ...provided, color: textMuted }),
+    menuPortal: provided => ({ ...provided, zIndex: 9999 }),
     menu: provided => ({
         ...provided,
         background: bgCard,
