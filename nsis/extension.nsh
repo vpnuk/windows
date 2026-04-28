@@ -42,43 +42,43 @@ send:
 !define uninstallOvpn "!insertmacro uninstallOvpn"
 
 !macro uninstallWg
-    ; Step 1 — Stop any running WireGuardTunnel services so the kernel driver
-    ; is not in use when the WireGuard uninstaller tries to remove it.
-    nsExec::ExecToStack 'powershell -NonInteractive -Command "Get-Service -Name WireGuardTunnel* -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction SilentlyContinue"'
+    ; Step 1 — Stop AND delete every WireGuardTunnel service entry.
+    ;
+    ; Stopping a service alone is not enough: its registration stays in the
+    ; Windows Service Control Manager database.  wireguard.exe /uninstall
+    ; detects those orphaned entries and aborts silently rather than risk
+    ; removing a service that might still be in use.  We therefore call
+    ; sc.exe delete on each one after stopping it, so the SCM database is
+    ; clean before the main uninstaller runs.
+    nsExec::ExecToStack 'powershell -NonInteractive -Command "$svcs = Get-Service -Name WireGuardTunnel* -ErrorAction SilentlyContinue; foreach ($s in $svcs) { Stop-Service $s -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; sc.exe delete $s.Name | Out-Null }"'
     Pop $0
     Pop $0
     Sleep 2000
 
-    ; Step 2 — Locate and run the WireGuard uninstaller.
+    ; Step 2 — Locate wireguard.exe from known install paths and call /uninstall.
     ;
-    ; IMPORTANT: The registry UninstallString already contains the FULL command,
-    ; e.g.  C:\Program Files\WireGuard\wireguard.exe /uninstall
-    ; Execute it directly with nsExec::ExecToStack '$0' — do NOT add extra
-    ; quotes around $0 or append another /uninstall, both of which produce a
-    ; malformed command that silently fails and leaves WireGuard installed.
-    ReadRegStr $0 HKLM "SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\WireGuard" "UninstallString"
-    ${If} $0 != ""
-        ; Registry path — use the value verbatim.
-        nsExec::ExecToStack '$0'
-        Pop $0
-        Pop $0
-        Sleep 3000
-    ${Else}
-        ; Registry entry missing — try known 64-bit then 32-bit install paths.
-        ; Use $1 so we do not clobber $0 (used as a scratch register by NSIS).
-        StrCpy $1 ""
-        IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" 0 +2
-        StrCpy $1 "$PROGRAMFILES64\WireGuard\wireguard.exe"
-        ${If} $1 == ""
-            IfFileExists "$PROGRAMFILES\WireGuard\wireguard.exe" 0 +2
-            StrCpy $1 "$PROGRAMFILES\WireGuard\wireguard.exe"
-        ${EndIf}
+    ; We use $1 (not $0) to keep the Pop register free for nsExec results.
+    ; Primary:  64-bit Program Files (covers the vast majority of installs).
+    ; Fallback: 32-bit Program Files.
+    ; Last resort: ask the registry for the installation directory.
+    StrCpy $1 ""
+    IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" 0 +2
+    StrCpy $1 "$PROGRAMFILES64\WireGuard\wireguard.exe"
+    ${If} $1 == ""
+        IfFileExists "$PROGRAMFILES\WireGuard\wireguard.exe" 0 +2
+        StrCpy $1 "$PROGRAMFILES\WireGuard\wireguard.exe"
+    ${EndIf}
+    ${If} $1 == ""
+        ReadRegStr $1 HKLM "SOFTWARE\WireGuard" "InstallationDirectory"
         ${If} $1 != ""
-            nsExec::ExecToStack '"$1" /uninstall'
-            Pop $0
-            Pop $0
-            Sleep 3000
+            StrCpy $1 "$1\wireguard.exe"
         ${EndIf}
+    ${EndIf}
+    ${If} $1 != ""
+        nsExec::ExecToStack '"$1" /uninstall'
+        Pop $0
+        Pop $0
+        Sleep 5000
     ${EndIf}
 !macroend
 !define uninstallWg "!insertmacro uninstallWg"
