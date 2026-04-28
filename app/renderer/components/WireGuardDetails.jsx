@@ -1,258 +1,170 @@
-import React, { useState, useEffect } from 'react';
-import { observer } from 'mobx-react-lite';
-import { action } from 'mobx';
+/**
+ * WireGuardDetails — Configuration status panel shown in the WireGuard tab.
+ *
+ * Auto-fetch on connect is handled entirely in ConnectionButton / wgApi.js.
+ * This panel just shows what config is currently stored and lets the user
+ * manually refresh or clear it.
+ */
+
+import React, { useState } from 'react';
+import { action }          from 'mobx';
+import { observer }        from 'mobx-react-lite';
 import '@components/index.css';
-import { useStore } from '@domain';
-import { settingsPath, wgConfSlug } from '@modules/constants.js';
+import { useStore }        from '@domain';
+import { settingsPath }    from '@modules/constants.js';
+import {
+    fetchWgConfig,
+    deleteWgConfig,
+    getConfEndpointIp,
+    getDeviceLabel,
+} from '@components/wgApi.js';
 
-const axios        = require('axios');
-const fs           = require('fs');
-const path         = require('path');
-const { shell }    = require('electron');
+const fs          = require('fs');
+const path        = require('path');
+const { shell }   = require('electron');
 
-const MANAGE_CONFIGS_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wireguard_v2.php';
-
-const WG_AUTH_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wg_v2_app_api.php';
-
-// Return a persistent per-installation device label such as "win-a3f7b2c1".
-// The label is generated once, written to %APPDATA%\VPNUK\device.json, and
-// reused on every subsequent fetch — so this installation always maps to the
-// same keypair and internal IP on the server, and never collides with another
-// device belonging to the same account.
-const getDeviceLabel = () => {
-    try {
-        if (fs.existsSync(settingsPath.device)) {
-            const data = JSON.parse(fs.readFileSync(settingsPath.device, 'utf-8'));
-            if (typeof data.label === 'string' && data.label.length > 0) return data.label;
-        }
-    } catch { /* ignore corrupt file — regenerate below */ }
-
-    // Generate: "win-" + 8 random lowercase hex chars
-    const hex   = Array.from({ length: 8 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-    const label = `win-${hex}`;
-    try { fs.writeFileSync(settingsPath.device, JSON.stringify({ label }), 'utf-8'); } catch { /* best-effort */ }
-    return label;
-};
-
-// Write to the profile's VPN log file so it appears in the LOG tab.
-// vpnuk-wg.conf lives in settingsFolder; logs/ is a sibling directory.
-const makeLogAppender = confPath => (profileId, msg) => {
-    try {
-        const logDir  = path.join(path.dirname(confPath), 'logs');
-        if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
-        const logFile = path.join(logDir, `${profileId}.log`);
-        const line    = `[${new Date().toISOString()}] ${msg}\n`;
-        fs.appendFileSync(logFile, line, 'utf-8');
-    } catch { /* best-effort */ }
-};
-
-// Replace the Endpoint hostname with the server IP in a WireGuard conf
-const patchEndpointToIp = (conf, serverIp) => {
-    if (!conf || !serverIp) return conf;
-    return conf.replace(
-        /^(Endpoint\s*=\s*)([a-zA-Z0-9._-]+)(\s*:\s*\d+)/m,
-        (_, prefix, host, portPart) => {
-            // Only replace if host is not already an IP
-            const isIp = /^\d+\.\d+\.\d+\.\d+$/.test(host);
-            return isIp ? `${prefix}${host}${portPart}` : `${prefix}${serverIp}${portPart}`;
-        }
-    );
-};
+const MANAGE_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wireguard_v2.php';
 
 const WireGuardDetails = observer(() => {
     const store   = useStore();
     const profile = store.profiles.currentProfile;
-    const [status, setStatus] = useState('');
-    const [statusType, setStatusType] = useState('');
-    const [loading, setLoading] = useState(false);
 
-    const serverDns  = profile.server?.dns  || '';
-    const serverHost = profile.server?.host || '';     // IP address
-    const isShared  = profile.serverType === 'shared';
+    const [status,     setStatus]     = useState('');
+    const [statusType, setStatusType] = useState('');   // '' | 'ok' | 'error'
+    const [loading,    setLoading]    = useState(false);
 
-    // wgConfSlug centralises the naming rule: dedicated/1:1 → always 'dedicated',
-    // shared → DNS slug per server.  Every component imports and uses the same
-    // function so they all resolve to the same path.
-    const confSlug  = wgConfSlug(profile.serverType, serverDns);
-    const confPath  = settingsPath.wgConf(profile.serverType, serverDns);
-    const confName  = path.basename(confPath);
-    const confDir   = path.dirname(confPath);
-    const log       = makeLogAppender(confPath);
+    const serverType = profile.serverType || 'shared';
+    const serverHost = profile.server?.host || '';
+    const mtuValue   = profile.details?.mtu?.value || '';
+    const confPath   = settingsPath.wgConf(serverType, null);
+    const confName   = path.basename(confPath);
 
-    useEffect(() => {
-        setStatus('');
-        setStatusType('');
-    }, [profile.id, confSlug]);
+    const confExists      = (() => { try { return fs.existsSync(confPath); } catch { return false; } })();
+    const endpointIp      = confExists ? getConfEndpointIp(confPath) : null;
+    const serverMismatch  = confExists && endpointIp && serverHost && endpointIp !== serverHost;
 
-    const configExists = () => {
-        try { return fs.existsSync(confPath); }
-        catch { return false; }
-    };
-
-    const fetchConfig = async () => {
-        const { login, password } = profile.credentials;
+    const handleRefresh = async () => {
+        const { login, password } = profile.credentials || {};
         if (!login || !password) {
-            setStatus('Enter your username and password in the Profile tab first.');
+            setStatus('Enter credentials in the Profile tab first.');
             setStatusType('error');
             return;
         }
         if (!serverHost) {
-            setStatus('No server assigned to this profile. Check the Profile tab.');
+            setStatus('Select a server in the Profile tab first.');
             setStatusType('error');
             return;
         }
 
         setLoading(true);
-        setStatus('Fetching WireGuard configuration...');
+        setStatus('Fetching config…');
         setStatusType('');
 
-        log(profile.id, `=== WireGuard Config Fetch ===`);
-        log(profile.id, `serverType : ${profile.serverType}`);
-        log(profile.id, `serverDns  : ${serverDns}`);
-        log(profile.id, `serverHost : ${serverHost}`);
-        log(profile.id, `confSlug   : ${confSlug}  (dedicated accounts always use "dedicated.conf")`);
-        log(profile.id, `confPath   : ${confPath}`);
-
-        // For shared accounts the API uses server (IP) to select the right server.
-        // For dedicated/1:1 accounts the API ignores this param and uses the server
-        // assigned to the account record — sending the IP is harmless.
-        //
-        // device_label is a persistent per-installation identifier (e.g. "win-a3f7b2c1").
-        // The server uses it to look up — or create — a config exclusively for this
-        // device, so two machines on the same account NEVER share a keypair or
-        // internal IP address.
-        const deviceLabel = getDeviceLabel();
-        const body = {
-            action:       'get_config',
-            username:     login,
-            password,
-            server:       serverHost,
-            device_label: deviceLabel,
-        };
-
-        log(profile.id, `POST server="${serverHost}" device_label="${deviceLabel}"`);
-
         try {
-            const params   = new URLSearchParams(body);
-            const response = await axios.post(WG_AUTH_URL, params.toString(), {
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                timeout: 15000,
-                validateStatus: () => true,
-            });
-
-            log(profile.id, `HTTP ${response.status} : ${JSON.stringify(response.data)}`);
-
-            if (response.data?.error) {
-                const errMsg = response.data.error;
-                log(profile.id, `API error: ${errMsg}`);
-                setStatus(errMsg);
-                setStatusType('error');
-
-            } else if (response.data?.config) {
-                const rawConf     = response.data.config;
-                const patchedConf = patchEndpointToIp(rawConf, serverHost);
-
-                const endpointRaw     = (rawConf.match(/^Endpoint\s*=.+/m)     || [''])[0];
-                const endpointPatched = (patchedConf.match(/^Endpoint\s*=.+/m) || [''])[0];
-
-                log(profile.id, `Endpoint original : ${endpointRaw}`);
-                log(profile.id, `Endpoint patched  : ${endpointPatched}`);
-
-                fs.writeFileSync(confPath, patchedConf, 'utf-8');
+            const result = await fetchWgConfig({ login, password, serverHost, mtuValue, confPath });
+            if (result.success) {
                 action(() => { profile.wgConfigFetched = !profile.wgConfigFetched; })();
-
-                setStatus(`Config saved: ${confName}  (${confDir})`);
+                setStatus(`Saved: ${confName}`);
                 setStatusType('ok');
-                log(profile.id, `Config written to: ${confPath}`);
-
             } else {
-                log(profile.id, `Unexpected response: ${JSON.stringify(response.data)}`);
-                setStatus('Unexpected response from server. Check the LOG tab.');
+                setStatus(result.error || 'Fetch failed.');
                 setStatusType('error');
             }
         } catch (err) {
-            log(profile.id, `Fetch exception: ${err.message}`);
-            setStatus(
-                err.code === 'ECONNABORTED'
-                    ? 'Request timed out. Check your internet connection.'
-                    : 'Could not reach the VPNUK server. Check your connection and try again.'
-            );
+            setStatus(err.message || 'Fetch failed.');
             setStatusType('error');
         } finally {
             setLoading(false);
         }
     };
 
-    const clearConfig = () => {
+    const handleClear = async () => {
+        const { login, password } = profile.credentials || {};
+
+        // Attempt to remove from server too (best-effort)
+        if (login && password && endpointIp) {
+            try { await deleteWgConfig({ login, password, serverHost: endpointIp }); } catch { /* ignore */ }
+        }
+
         try {
-            if (fs.existsSync(confPath)) fs.unlinkSync(confPath);
+            if (confExists) fs.unlinkSync(confPath);
             action(() => { profile.wgConfigFetched = !profile.wgConfigFetched; })();
-            setStatus('Config cleared. Fetch again to reconnect.');
+            setStatus('Config cleared. A new one will be fetched on Connect.');
             setStatusType('');
-            log(profile.id, `Config cleared: ${confPath}`);
         } catch {
-            setStatus('Failed to clear config.');
+            setStatus('Failed to clear config file.');
             setStatusType('error');
         }
     };
 
-    const hasConfig    = configExists();
-    const isLimitError = status.toLowerCase().includes('config limit reached');
-
-    const openManageConfigs = () => shell.openExternal(MANAGE_CONFIGS_URL);
+    const isLimitError = status.toLowerCase().includes('config limit');
 
     return (
         <div style={{ paddingTop: 8 }}>
+
+            {/* ── Status card ─────────────────────────────────────────────── */}
             <div className="app-notification app-notification--info">
                 <span className="app-notification-icon">🔒</span>
                 <div className="app-notification-body">
-                    <h4>WireGuard</h4>
+                    <h4>WireGuard — Auto-Connect</h4>
                     <p>
-                        {!isShared
-                            ? 'Your dedicated config will be fetched from your account. Click below to download it.'
-                            : 'A config will be generated for the selected server. Switch servers and fetch again for each one.'
-                        }
+                        Your config is generated and saved automatically when you click{' '}
+                        <strong>Connect</strong>. If you switch servers the old config is
+                        released and a new one fetched seamlessly.
                     </p>
-                    {hasConfig && (
+
+                    {confExists && !serverMismatch && (
                         <p style={{ fontSize: 11, opacity: 0.7, margin: '4px 0 0' }}>
-                            Saved: {confName}
+                            Active config: <strong>{confName}</strong>
+                            {endpointIp ? ` · Endpoint ${endpointIp}` : ''}
+                        </p>
+                    )}
+
+                    {serverMismatch && (
+                        <p style={{ fontSize: 11, color: '#e67e22', margin: '4px 0 0' }}>
+                            ⚠ Config is for a different server ({endpointIp}) — will be
+                            refreshed automatically on next Connect.
+                        </p>
+                    )}
+
+                    {!confExists && (
+                        <p style={{ fontSize: 11, opacity: 0.6, margin: '4px 0 0' }}>
+                            No config saved yet — will be generated on Connect.
                         </p>
                     )}
                 </div>
             </div>
 
+            {/* ── Manual controls ─────────────────────────────────────────── */}
             <div className="wg-fetch-section">
                 <button
                     className="form-button"
-                    onClick={fetchConfig}
+                    onClick={handleRefresh}
                     disabled={loading}
                 >
-                    {loading ? 'Fetching...' : hasConfig ? 'Refresh Config' : 'Fetch WireGuard Config'}
+                    {loading ? 'Fetching…' : confExists ? 'Refresh Config' : 'Fetch Config Now'}
                 </button>
 
-                {hasConfig && !loading && (
+                {confExists && !loading && (
                     <button
                         className="form-button form-button--danger"
-                        onClick={clearConfig}
+                        onClick={handleClear}
                         style={{ marginTop: 6 }}
                     >
                         Clear Config
                     </button>
                 )}
 
-                {/* Config limit error: show a prominent warning with a direct link */}
+                {/* Config-limit warning with manage link */}
                 {isLimitError && (
                     <div className="app-notification app-notification--warning" style={{ marginTop: 10 }}>
                         <span className="app-notification-icon">⚠️</span>
                         <div className="app-notification-body">
                             <h4>Config limit reached</h4>
-                            <p>
-                                You have the maximum number of WireGuard configs for this account.
-                                Delete an old one first, then fetch again.
-                            </p>
+                            <p>Remove an old config, then try again.</p>
                             <button
                                 className="form-button"
-                                onClick={openManageConfigs}
+                                onClick={() => shell.openExternal(MANAGE_URL)}
                                 style={{ marginTop: 8, height: 32, fontSize: 12 }}
                             >
                                 Manage WireGuard Configs →
@@ -261,16 +173,15 @@ const WireGuardDetails = observer(() => {
                     </div>
                 )}
 
-                {/* Regular status message (non-limit errors and success) */}
                 {status && !isLimitError && (
                     <p className={`wg-status ${statusType}`}>{status}</p>
                 )}
             </div>
 
-            {/* Always-visible manage link at the bottom */}
+            {/* ── Always-visible manage link ───────────────────────────────── */}
             <div style={{ textAlign: 'center', marginTop: 12 }}>
                 <button
-                    onClick={openManageConfigs}
+                    onClick={() => shell.openExternal(MANAGE_URL)}
                     style={{
                         background: 'none',
                         border: 'none',
