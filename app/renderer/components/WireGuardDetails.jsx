@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react-lite';
 import { action } from 'mobx';
 import '@components/index.css';
 import { useStore } from '@domain';
+import { settingsPath } from '@modules/constants.js';
 
 const axios = require('axios');
 const fs    = require('fs');
-const path  = require('path');
 
 const WG_AUTH_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wg_v2_app_api.php';
 
@@ -17,10 +17,13 @@ const WireGuardDetails = observer(() => {
     const [statusType, setStatusType] = useState('');
     const [loading, setLoading] = useState(false);
 
-    const confPath = path.join(
-        require('process').env.APPDATA + '\\VPNUK',
-        `wg-${profile.id}.conf`
-    );
+    const serverHost = profile.server?.host || '';
+    const confPath   = settingsPath.wgConf(profile.id, serverHost);
+
+    useEffect(() => {
+        setStatus('');
+        setStatusType('');
+    }, [profile.id, serverHost]);
 
     const configExists = () => {
         try { return fs.existsSync(confPath); }
@@ -34,20 +37,21 @@ const WireGuardDetails = observer(() => {
             setStatusType('error');
             return;
         }
+        if (!serverHost) {
+            setStatus('Select a server in the Profile tab first.');
+            setStatusType('error');
+            return;
+        }
         setLoading(true);
         setStatus('Fetching WireGuard configuration...');
         setStatusType('');
         try {
-            const server = profile.serverType === 'shared'
-                ? (profile.server?.host || '')
-                : '';
-
             const params = new URLSearchParams({
                 action: 'get_config',
                 username: login,
                 password,
                 server_type: profile.serverType,
-                ...(server ? { server: server } : {})
+                server: serverHost,
             });
 
             const response = await axios.post(WG_AUTH_URL, params.toString(), {
@@ -61,8 +65,8 @@ const WireGuardDetails = observer(() => {
                 setStatusType('error');
             } else if (response.data?.config) {
                 fs.writeFileSync(confPath, response.data.config, 'utf-8');
-                action(() => { profile.wgConfigFetched = true; })();
-                setStatus('Config saved successfully. You can now connect.');
+                action(() => { profile.wgConfigFetched = !profile.wgConfigFetched; })();
+                setStatus('Config saved. You can now connect.');
                 setStatusType('ok');
             } else {
                 setStatus('Unexpected response from server. Please try again.');
@@ -83,7 +87,7 @@ const WireGuardDetails = observer(() => {
     const clearConfig = () => {
         try {
             if (fs.existsSync(confPath)) fs.unlinkSync(confPath);
-            action(() => { profile.wgConfigFetched = false; })();
+            action(() => { profile.wgConfigFetched = !profile.wgConfigFetched; })();
             setStatus('Config cleared. Fetch again to reconnect.');
             setStatusType('');
         } catch {
@@ -91,6 +95,8 @@ const WireGuardDetails = observer(() => {
             setStatusType('error');
         }
     };
+
+    const hasConfig = configExists();
 
     return (
         <div style={{ paddingTop: 8 }}>
@@ -101,7 +107,7 @@ const WireGuardDetails = observer(() => {
                     <p>
                         {profile.serverType === 'dedicated' || profile.serverType === 'dedicated11'
                             ? 'Your dedicated config will be fetched from your account. Click below to download it.'
-                            : 'A shared server config will be generated for you automatically.'
+                            : 'A config will be generated for the selected server. Switch servers and fetch again for each one.'
                         }
                     </p>
                 </div>
@@ -113,10 +119,10 @@ const WireGuardDetails = observer(() => {
                     onClick={fetchConfig}
                     disabled={loading}
                 >
-                    {loading ? 'Fetching...' : configExists() ? 'Refresh Config' : 'Fetch WireGuard Config'}
+                    {loading ? 'Fetching...' : hasConfig ? 'Refresh Config' : 'Fetch WireGuard Config'}
                 </button>
 
-                {configExists() && !loading && (
+                {hasConfig && !loading && (
                     <button
                         className="form-button form-button--danger"
                         onClick={clearConfig}
@@ -128,12 +134,6 @@ const WireGuardDetails = observer(() => {
 
                 {status && (
                     <p className={`wg-status ${statusType}`}>{status}</p>
-                )}
-
-                {configExists() && (
-                    <p className="wg-status ok">
-                        ✓ Config is ready — use the Connection tab to connect
-                    </p>
                 )}
             </div>
         </div>
