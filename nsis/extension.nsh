@@ -98,6 +98,25 @@ send:
         Pop $0
         MessageBox MB_OK "Error setting PSModulePath:$\n$0"
     ${EndIf}
+
+    ; ─── Task Scheduler ──────────────────────────────────────────────────────
+    ; Register an on-demand scheduled task that runs VPNUK at the highest
+    ; available privilege level.  Desktop and Start Menu shortcuts are then
+    ; rewritten to target schtasks.exe (which is asInvoker and carries no UAC
+    ; shield) while keeping the VPNUK icon — so the shield never appears.
+    nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
+    Pop $0
+    Pop $0
+    nsExec::ExecToStack 'schtasks /Create /TN "VPNUK" /TR "$\"$INSTDIR\VPNUK.exe$\"" /SC ONDEMAND /RL HIGHEST /F'
+    Pop $0
+    ${If} $0 == 0
+        Pop $0
+        SetShellVarContext all
+        CreateShortCut "$DESKTOP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
+        CreateShortCut "$SMPROGRAMS\VPNUK\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
+    ${Else}
+        Pop $0
+    ${EndIf}
 !macroend
 
 ; --------------- OVPN ----------------
@@ -560,6 +579,11 @@ FunctionEnd
         ${EndIf}
         
         SetShellVarContext all
+
+        ; ─── Task Scheduler cleanup ───────────────────────────────────────────
+        nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
+        Pop $0
+        Pop $0
 
         ; ----------- PSModulePath ------------
         call un.PSModulePath
