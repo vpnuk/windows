@@ -37,7 +37,7 @@ class WireGuard extends VpnBase {
     constructor(profile, hooks) {
         super(profile, hooks);
         this.#tunnelName    = getTunnelName(profile.id);
-        this.#confPath      = settingsPath.wgConf(profile.id);
+        this.#confPath      = settingsPath.wgConf(profile.id, profile.server?.host);
         this.#connectionStatus = connectionStates.disconnected;
     }
 
@@ -106,8 +106,8 @@ class WireGuard extends VpnBase {
     #uninstallTunnel(wgExe) {
         return new Promise(resolve => {
             const proc = cp.spawn(wgExe, ['/uninstalltunnel', this.#tunnelName], { shell: false });
-            proc.stdout?.pipe(this._logStream);
-            proc.stderr?.pipe(this._logStream);
+            proc.stdout?.pipe(this._logStream, { end: false });
+            proc.stderr?.pipe(this._logStream, { end: false });
             proc.on('close', code => {
                 this._logStream.write(`wireguard /uninstalltunnel exit: ${code}\n`);
                 resolve(code);
