@@ -57,22 +57,20 @@ const ConnectionDetails = observer(() => {
             </div>
 
             <div>
-                <div className="form-titles" style={{ marginBottom: 6 }}>DNS</div>
+                <div className="form-titles" style={{ marginBottom: 6 }}>Custom DNS</div>
                 <ValueSelector
                     options={Dns.values}
                     value={profile.details.dns}
                     onChange={action(value => profile.details.dns = value)} />
             </div>
 
-            {profile.vpnType === VpnType.OpenVPN.label && (
-                <div>
-                    <div className="form-titles" style={{ marginBottom: 6 }}>MTU</div>
-                    <ValueSelector
-                        options={optionsMtu}
-                        value={profile.details.mtu}
-                        onChange={action(value => profile.details.mtu = value)} />
-                </div>
-            )}
+            <div>
+                <div className="form-titles" style={{ marginBottom: 6 }}>Custom MTU</div>
+                <ValueSelector
+                    options={optionsMtu}
+                    value={profile.details.mtu}
+                    onChange={action(value => profile.details.mtu = value)} />
+            </div>
         </div>
     </>;
 });
