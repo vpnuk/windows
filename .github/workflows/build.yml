@@ -69,22 +69,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          # Rename exe (spaces -> hyphens)
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $build   = "${{ github.run_number }}"
+          $tag     = "v$version-build$build"
+          $title   = "VPNUK $version (build $build)"
+
           foreach ($exe in (Get-ChildItem .\release\*.exe)) {
-            $slug = $exe.Name -replace ' ', '-'
-            if ($exe.Name -ne $slug) { Rename-Item $exe.FullName $slug }
+            $newName = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
+            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $newName)
           }
 
-          # Build artifact list
           $artifacts = @()
           foreach ($exe in (Get-ChildItem .\release\*.exe)) { $artifacts += $exe.FullName }
           if (Test-Path ".\release\latest.yml") { $artifacts += (Resolve-Path ".\release\latest.yml").Path }
 
-          Write-Host "Artifacts to upload:"
+          Write-Host "Tag: $tag  Title: $title"
           $artifacts | ForEach-Object { Write-Host "  $_" }
 
-          gh release create v1.3.1 `
-            --title "VPNUK 1.3.1" `
+          gh release create $tag `
+            --title $title `
             --draft `
-            --notes "" `
-            @artifacts
+            --notes "Build $build" `
+            @$artifacts
