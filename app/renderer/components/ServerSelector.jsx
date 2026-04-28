@@ -29,11 +29,17 @@ const ServerSelector = observer(() => {
     }, [profile.serverType, catalog.length]);
 
     // ── Scroll the selected row into view ────────────────────────────────────
+    // Uses setTimeout(0) so the DOM is fully laid out before scrolling.
+    // block:'center' keeps the selection visible even when it's deep in the list.
+    // Fires on serverType change too (new catalog = new list = selected may shift).
     useEffect(() => {
-        if (!listRef.current) return;
-        const sel = listRef.current.querySelector('[data-selected="true"]');
-        if (sel) sel.scrollIntoView({ block: 'nearest' });
-    }, [profile.server?.host]);
+        const t = setTimeout(() => {
+            if (!listRef.current) return;
+            const sel = listRef.current.querySelector('[data-selected="true"]');
+            if (sel) sel.scrollIntoView({ block: 'center', behavior: 'auto' });
+        }, 0);
+        return () => clearTimeout(t);
+    }, [profile.server?.host, profile.serverType]);
 
     return (
         <div ref={listRef} className="server-list">
