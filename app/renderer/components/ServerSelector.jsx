@@ -6,9 +6,6 @@ import ReactCountryFlag from 'react-country-flag';
 import '@components/index.css';
 import { ValueSelector } from '@components';
 import { Servers, useStore } from '@domain';
-import { settingsPath, wgConfSlug, VpnType } from '@modules/constants.js';
-
-const fs = require('fs');
 
 const toIso = code => (code === 'UK' ? 'GB' : (code || '').toUpperCase());
 
@@ -34,33 +31,8 @@ const formatServerOption = option => (
     </div>
 );
 
-const WireGuardConfigStatus = observer(({ profile }) => {
-    const serverDns = profile.server?.dns || '';
-    void profile.wgConfigFetched;
-    // Use the shared slug function so the path always matches what WireGuardDetails writes.
-    const confPath = settingsPath.wgConf(profile.serverType, serverDns);
-    let hasConfig = false;
-    try { hasConfig = fs.existsSync(confPath); } catch { }
-
-    // For dedicated accounts the conf exists as soon as it has been fetched once;
-    // no server selection is required, so always show the status line.
-    const isDedicated = profile.serverType === 'dedicated' || profile.serverType === 'dedicated11';
-    if (!serverDns && !isDedicated) return null;
-
-    return hasConfig ? (
-        <p style={{ margin: '8px 0 0', fontSize: 12, color: '#1aceb8' }}>
-            ✓ WireGuard config ready for this server
-        </p>
-    ) : (
-        <p style={{ margin: '8px 0 0', fontSize: 12, color: '#e6a817' }}>
-            No WireGuard config for this server — go to the Connection tab to fetch one
-        </p>
-    );
-});
-
 const ServerSelector = observer(() => {
     const profile = useStore().profiles.currentProfile;
-    const isWireGuard = profile.vpnType === VpnType.WireGuard.label;
 
     useEffect(() => {
         let catalog = Servers.getCatalog(profile.serverType);
@@ -93,7 +65,6 @@ const ServerSelector = observer(() => {
             formatOptionLabel={formatServerOption}
             onChange={action(value => profile.server = value)} />
 
-        {isWireGuard && <WireGuardConfigStatus profile={profile} />}
     </>
 });
 
