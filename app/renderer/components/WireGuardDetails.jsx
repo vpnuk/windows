@@ -12,16 +12,10 @@ import { observer }        from 'mobx-react-lite';
 import '@components/index.css';
 import { useStore }        from '@domain';
 import { settingsPath }    from '@modules/constants.js';
-import {
-    fetchWgConfig,
-    deleteWgConfig,
-    getConfEndpointIp,
-    getDeviceLabel,
-} from '@components/wgApi.js';
-
 const fs          = require('fs');
 const path        = require('path');
 const { shell }   = require('electron');
+const { fetchWgConfig, deleteWgConfig, getConfEndpointIp } = require('@components/wgApi.js');
 
 const MANAGE_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wireguard_v2.php';
 
