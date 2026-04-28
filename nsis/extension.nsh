@@ -50,7 +50,7 @@ send:
     ; removing a service that might still be in use.  We therefore call
     ; sc.exe delete on each one after stopping it, so the SCM database is
     ; clean before the main uninstaller runs.
-    nsExec::ExecToStack 'powershell -NonInteractive -Command "$svcs = Get-Service -Name WireGuardTunnel* -ErrorAction SilentlyContinue; foreach ($s in $svcs) { Stop-Service $s -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; sc.exe delete $s.Name | Out-Null }"'
+    nsExec::ExecToStack 'powershell -NonInteractive -Command "$$svcs = Get-Service -Name WireGuardTunnel* -ErrorAction SilentlyContinue; foreach ($$s in $$svcs) { Stop-Service $$s -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; sc.exe delete $$s.Name | Out-Null }"'
     Pop $0
     Pop $0
     Sleep 2000
