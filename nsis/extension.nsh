@@ -213,6 +213,11 @@ send:
                     MessageBox MB_OK "Error installing openvpn:$\n$0"
                     Abort
                 ${EndIf}
+                ; Write versions.json so the app doesn't prompt to update on first run
+                CreateDirectory "$APPDATA\VPNUK"
+                FileOpen $0 "$APPDATA\VPNUK\versions.json" w
+                FileWrite $0 '{"openvpn":{"version":"$ovpnVersion"}}'
+                FileClose $0
             ${Else}
                 MessageBox MB_OK "Error loading openvpn:$\n$1"
                 Abort
