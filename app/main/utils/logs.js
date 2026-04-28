@@ -21,7 +21,7 @@ const openLogFileExternal = id => {
     const logPath = getLogPath(id);
 
     if (!fs.existsSync(logPath) || !fs.lstatSync(logPath).isFile()) {
-        throw new Error('No log file exists.');
+        throw new Error('No log yet — connect first to generate one.');
     }
 
     var proc = require('child_process')
