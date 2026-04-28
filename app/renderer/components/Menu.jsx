@@ -150,61 +150,62 @@ const Menu = observer(() => {
     );
 });
 
-// ── Profile tab: credentials left, server list right ─────────────────────────
+// ── Profile tab ───────────────────────────────────────────────────────────────
 const ProfileTab = observer(({ logMsg, setLogMsg }) => {
     const store   = useStore();
     const profile = store.profiles.currentProfile;
 
     return (
-        <div style={{ display: 'flex', gap: 10, paddingTop: 10 }}>
-            {/* ── Left: credentials + account type + connect ─────────────── */}
-            <div style={{ flex: '0 0 44%', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 10 }}>
 
-                <div className="form-label">Username</div>
-                <input
-                    className="form-input"
-                    placeholder="login"
-                    autoComplete="username"
-                    value={profile.credentials.login}
-                    onChange={action(e => profile.credentials.login = e.target.value.trim())}
-                />
-
-                <div className="form-label">Password</div>
-                <input
-                    className="form-input"
-                    type="password"
-                    placeholder="password"
-                    autoComplete="current-password"
-                    value={profile.credentials.password}
-                    onChange={action(e => profile.credentials.password = e.target.value.trim())}
-                />
-
-                <div style={{ marginTop: 4 }}>
-                    <Radio.Group
-                        className="server-type-radio"
-                        value={profile.serverType}
-                        onChange={action(e => {
-                            profile.serverType = e.target.value;
-                            const cat = Servers.getCatalog(e.target.value);
-                            if (cat.length > 0) profile.server = cat[0];
-                        })}
-                    >
-                        <Radio.Button value="shared">Shared</Radio.Button>
-                        <Radio.Button value="dedicated">Dedicated</Radio.Button>
-                        <Radio.Button value="dedicated11">1:1</Radio.Button>
-                    </Radio.Group>
+            {/* Row 1: credentials (narrow) | server selector (wider) */}
+            <div style={{ display: 'flex', gap: 10 }}>
+                <div style={{ flex: '0 0 28%', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    <div className="form-label">Username</div>
+                    <input
+                        className="form-input"
+                        placeholder="login"
+                        autoComplete="username"
+                        value={profile.credentials.login}
+                        onChange={action(e => profile.credentials.login = e.target.value.trim())}
+                    />
+                    <div className="form-label">Password</div>
+                    <input
+                        className="form-input"
+                        type="password"
+                        placeholder="password"
+                        autoComplete="current-password"
+                        value={profile.credentials.password}
+                        onChange={action(e => profile.credentials.password = e.target.value.trim())}
+                    />
                 </div>
-
-                {/* ── Connect button sits in the left column ──────────────── */}
-                <div style={{ marginTop: 6 }}>
-                    <ConnectionButton />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                    <ServerSelector />
                 </div>
             </div>
 
-            {/* ── Right: server list (capped height, scrolls internally) ─── */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <ServerSelector />
+            {/* Row 2: account type radio buttons — full width */}
+            <div>
+                <Radio.Group
+                    className="server-type-radio"
+                    value={profile.serverType}
+                    onChange={action(e => {
+                        profile.serverType = e.target.value;
+                        const cat = Servers.getCatalog(e.target.value);
+                        if (cat.length > 0) profile.server = cat[0];
+                    })}
+                >
+                    <Radio.Button value="shared">Shared</Radio.Button>
+                    <Radio.Button value="dedicated">Dedicated</Radio.Button>
+                    <Radio.Button value="dedicated11">1:1</Radio.Button>
+                </Radio.Group>
             </div>
+
+            {/* Row 3: connect button (full width) + persistent status panel inside */}
+            <div style={{ marginTop: 17 }}>
+                <ConnectionButton />
+            </div>
+
         </div>
     );
 });
