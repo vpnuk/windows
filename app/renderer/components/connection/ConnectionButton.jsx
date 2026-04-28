@@ -10,22 +10,27 @@ const { ensureWgConfig } = require('../wgApi');
 // ── Step-log panel styles ──────────────────────────────────────────────────────
 const S = {
     log: {
-        marginTop: 8,
-        padding: '5px 8px',
+        padding: '6px 8px',
         background: 'rgba(0,0,0,0.38)',
         border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 4,
-        maxHeight: 96,
+        minHeight: 88,
+        maxHeight: 120,
         overflowY: 'auto',
         fontFamily: 'monospace',
         fontSize: 11,
         lineHeight: 1.6,
         color: '#90b8f8',
+        marginBottom: 10,
+    },
+    placeholder: {
+        display: 'block',
+        color: 'rgba(144, 184, 248, 0.25)',
+        userSelect: 'none',
     },
     line: { display: 'block', whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
     lineActive: { color: '#fff', fontWeight: 700 },
     error: {
-        marginTop: 8,
         padding: '6px 8px',
         background: 'rgba(231,76,60,0.15)',
         border: '1px solid rgba(231,76,60,0.45)',
@@ -34,13 +39,15 @@ const S = {
         color: '#e74c3c',
         wordBreak: 'break-word',
         whiteSpace: 'pre-wrap',
+        minHeight: 88,
+        marginBottom: 10,
     },
 };
 
 const ConnectionButton = observer(() => {
     const profile = useStore().profiles.currentProfile;
 
-    const [stepLog,  setStepLog]  = useState([]);   // array of step strings
+    const [stepLog,  setStepLog]  = useState([]);
     const [errorMsg, setErrorMsg] = useState('');
     const [busy,     setBusy]     = useState(false);
     const logEndRef = useRef(null);
@@ -106,37 +113,10 @@ const ConnectionButton = observer(() => {
     const isConnected = ConnectionStore.state !== connectionStates.disconnected;
     const label       = busy ? 'Preparing\u2026' : isConnected ? 'Disconnect' : 'Connect';
 
-    // Show the step log while busy or just after a successful connect sequence
-    const showLog = !errorMsg && stepLog.length > 0 && !isConnected;
-
     return (
         <div>
-            <button
-                className="form-button"
-                onClick={handleClick}
-                disabled={busy}
-                style={busy ? { opacity: 0.7, cursor: 'not-allowed' } : undefined}
-            >
-                {label}
-            </button>
-
-            {/* Step-by-step progress log — monospace mini-terminal */}
-            {showLog && (
-                <div style={S.log}>
-                    {stepLog.map((line, i) => {
-                        const isCurrent = i === stepLog.length - 1;
-                        return (
-                            <span key={i} style={isCurrent ? { ...S.line, ...S.lineActive } : S.line}>
-                                {isCurrent && busy ? '\u25b6 ' : '\u2714 '}{line}
-                            </span>
-                        );
-                    })}
-                    <span ref={logEndRef} />
-                </div>
-            )}
-
-            {/* Error panel — red, shows completed steps above the error message */}
-            {errorMsg && (
+            {/* ── Persistent status panel — always visible above the button ── */}
+            {errorMsg ? (
                 <div style={S.error}>
                     {stepLog.length > 0 && (
                         <div style={{ marginBottom: 4, opacity: 0.65, fontSize: 10 }}>
@@ -148,7 +128,33 @@ const ConnectionButton = observer(() => {
                     <strong style={{ display: 'block', marginBottom: 2 }}>{'\u26a0'} Error</strong>
                     {errorMsg}
                 </div>
+            ) : (
+                <div style={S.log}>
+                    {stepLog.length > 0 ? (
+                        stepLog.map((line, i) => {
+                            const isCurrent = i === stepLog.length - 1;
+                            return (
+                                <span key={i} style={isCurrent ? { ...S.line, ...S.lineActive } : S.line}>
+                                    {isCurrent && busy ? '\u25b6 ' : '\u2714 '}{line}
+                                </span>
+                            );
+                        })
+                    ) : (
+                        <span style={S.placeholder}>— ready —</span>
+                    )}
+                    <span ref={logEndRef} />
+                </div>
             )}
+
+            {/* ── Connect / Disconnect button ─────────────────────────────── */}
+            <button
+                className="form-button"
+                onClick={handleClick}
+                disabled={busy}
+                style={busy ? { opacity: 0.7, cursor: 'not-allowed' } : undefined}
+            >
+                {label}
+            </button>
         </div>
     );
 });
