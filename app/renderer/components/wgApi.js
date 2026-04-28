@@ -186,14 +186,22 @@ const ensureWgConfig = async (profile, onStatus) => {
 
     logToFile(profileId, `[wgApi] existingEndpointIp=${existingEndpointIp || '(none)'}  serverChanged=${serverChanged}`);
 
-    // Re-check dedicated/1:1 IPs once a day to catch assigned-IP rotations.
-    let dedicatedStale = false;
-    if (isDedicated && confExists) {
+    // Dedicated/1:1 servers: ALWAYS fetch a fresh config before every connect.
+    // The WireGuard peer entry on the server can be cleared or rotated at any time
+    // (reboot, key rotation, server maintenance). Reusing a cached config causes a
+    // silent handshake failure — the tunnel installs (exit 0) but never routes
+    // traffic because the server no longer recognises the client's public key.
+    // For shared servers the 24-hour staleness window is sufficient.
+    let dedicatedStale = isDedicated; // dedicated = always stale (always re-fetch)
+    if (!isDedicated && confExists) {
         try {
             const ageH     = (Date.now() - fs.statSync(confPath).mtimeMs) / 3600000;
             dedicatedStale = ageH > 24;
-            logToFile(profileId, `[wgApi] dedicated conf age: ${ageH.toFixed(1)} h  stale=${dedicatedStale}`);
+            logToFile(profileId, `[wgApi] shared conf age: ${ageH.toFixed(1)} h  stale=${dedicatedStale}`);
         } catch { /* ignore */ }
+    }
+    if (isDedicated) {
+        logToFile(profileId, `[wgApi] dedicated/1:1 — always fetching fresh config`);
     }
 
     const needsFetch = !confExists || serverChanged || dedicatedStale;
