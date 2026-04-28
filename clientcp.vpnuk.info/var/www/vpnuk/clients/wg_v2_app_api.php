@@ -96,26 +96,34 @@ switch ($action) {
             $ded_server  = wg2_get_server($ded_srv_key);
             if (!$ded_server) api_err('Your assigned server was not found. Please contact support.');
 
-            $server_host     = trim($_POST['server'] ?? '');
-            $ded_server_host = $ded_server['address'] ?? '';
+            $server_host = trim($_POST['server'] ?? '');
 
-            if (!empty($server_host) && $server_host !== $ded_server_host) {
-                // Client is requesting a different server — serve a shared config
-                $srv_key = null;
-                $server  = null;
+            // Check whether the client is requesting a known shared server.
+            // If the server_host matches one, serve a shared config.
+            // For anything else (dedicated server, empty, or unrecognised host)
+            // fall through to the dedicated config — no exact-match comparison
+            // needed, so format differences (hostname vs IP) can't cause errors.
+            $shared_key    = null;
+            $shared_server = null;
+            if (!empty($server_host)) {
                 foreach (wg2_get_shared_servers() as $key => $s) {
                     if (($s['address'] ?? '') === $server_host) {
-                        $srv_key = $key;
-                        $server  = $s;
+                        $shared_key    = $key;
+                        $shared_server = $s;
                         break;
                     }
                 }
-                if (!$srv_key) api_err('Invalid server selected.');
-                if (!wg2_server_ready($server)) api_err('WireGuard is not yet available on this server. Please try another.');
+            }
+
+            if ($shared_key) {
+                // Dedicated-account user has chosen a shared server in the app
+                if (!wg2_server_ready($shared_server)) api_err('WireGuard is not yet available on this server. Please try another.');
+                $srv_key      = $shared_key;
+                $server       = $shared_server;
                 $dedicated_ip = '';
                 $max          = min(10, max(1, (int) $user->allowed_sessions()));
             } else {
-                // Serve the dedicated server config
+                // Serve the user's dedicated server config
                 if (!wg2_server_ready($ded_server)) api_err('WireGuard is not yet available on your server. Please contact support.');
                 $srv_key      = $ded_srv_key;
                 $server       = $ded_server;
