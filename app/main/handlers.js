@@ -1,4 +1,4 @@
-const { app, dialog, ipcMain } = require('electron');
+const { app, dialog, ipcMain, BrowserWindow, shell } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
 const publicIp = require('public-ip');
@@ -314,4 +314,31 @@ ipcMain.on('ikev2-cert-install', async (event, arg) => {
         }
     }
     event.sender.send('ikev2-cert-installed', true);
+});
+
+// ── Live Help — open Tawk.to chat in a detached floating window ───────────────
+const TAWK_URL = 'https://tawk.to/chat/56bae5de496019e65d794d8f/default';
+let liveHelpWindow = null;
+
+ipcMain.on('open-live-help', () => {
+    if (liveHelpWindow && !liveHelpWindow.isDestroyed()) {
+        liveHelpWindow.focus();
+        return;
+    }
+    liveHelpWindow = new BrowserWindow({
+        width:  420,
+        height: 600,
+        title:  'VPNUK Live Help',
+        icon:   path.join(__dirname, '../../app/assets/icon.ico'),
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+        },
+        resizable: true,
+        minimizable: true,
+        maximizable: false,
+    });
+    liveHelpWindow.loadURL(TAWK_URL);
+    liveHelpWindow.setMenuBarVisibility(false);
+    liveHelpWindow.on('closed', () => { liveHelpWindow = null; });
 });
