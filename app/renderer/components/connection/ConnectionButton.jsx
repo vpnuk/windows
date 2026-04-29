@@ -112,7 +112,7 @@ const ConnectionButton = observer(() => {
             const protocol = details.protocol || 'TCP';
             const port     = details.port     || '443';
             const isObfs   = protocol === 'Obfuscation';
-            pushStep(`Connecting over ${isObfs ? 'TCP (obfuscated)' : protocol} port ${port}\u2026`);
+            pushStep(`Connecting over ${isObfs ? 'UDP (obfuscated)' : protocol} port ${port}\u2026`);
             pushStep('Handing off to OpenVPN service\u2026');
         }
 
@@ -129,10 +129,24 @@ const ConnectionButton = observer(() => {
             wVpnOptions: toJS(WvpnOptions),
         });
 
-        // Once the state changes from disconnected, append the connected line.
+        // Poll until we reach a definitive connected or failed state.
+        // We must NOT fire on 'connecting' — only on the real 'connected' state.
+        let seenConnecting = false;
+        let ticks = 0;
+        const maxTicks = 400; // ~120 s safety cap
         const clear = setInterval(() => {
-            if (ConnectionStore.state !== connectionStates.disconnected) {
+            ticks++;
+            const st = ConnectionStore.state;
+            if (st === connectionStates.connecting) {
+                seenConnecting = true;
+            } else if (st === connectionStates.connected) {
                 pushStep(`Connected to ${profile.server?.label || 'server'} \u2713`);
+                clearInterval(clear);
+            } else if (st === connectionStates.disconnected && seenConnecting) {
+                // Went back to disconnected without reaching connected — auth or tunnel failure.
+                setErrorMsg('Connection failed. Please check your username and password, then try again.');
+                clearInterval(clear);
+            } else if (ticks >= maxTicks) {
                 clearInterval(clear);
             }
         }, 300);
