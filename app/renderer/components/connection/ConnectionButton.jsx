@@ -10,7 +10,7 @@ const { ensureWgConfig } = require('../wgApi');
 // ── Step-log panel styles ──────────────────────────────────────────────────────
 // Fixed height shared by both the log and error panel — must never change so
 // the layout doesn't shift as lines are added or scrollbars appear.
-const PANEL_HEIGHT = 152;
+const PANEL_HEIGHT = 100;
 
 const S = {
     log: {
