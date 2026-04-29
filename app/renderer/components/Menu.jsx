@@ -19,6 +19,8 @@ import { isDev }           from '@app';
 const { TabPane }       = Tabs;
 const { ipcRenderer }   = require('electron');
 
+const TAWK_URL = 'https://tawk.to/chat/56bae5de496019e65d794d8f/default';
+
 const annotateProviderLabels = providers =>
     Object.entries(providers).map(([, provider]) => ({
         value:      provider.label,
@@ -135,6 +137,22 @@ const Menu = observer(() => {
                         )}
                     </div>
                 </TabPane>
+
+                <TabPane tab="Live Help" key="livehelp">
+                    <div style={{ paddingTop: 8 }}>
+                        <webview
+                            src={TAWK_URL}
+                            style={{
+                                width: '100%',
+                                height: 480,
+                                border: 'none',
+                                borderRadius: 4,
+                                background: '#fff',
+                            }}
+                            allowpopups="true"
+                        />
+                    </div>
+                </TabPane>
             </Tabs>
 
             {isDev && (
@@ -156,7 +174,7 @@ const ProfileTab = observer(({ logMsg, setLogMsg }) => {
     const profile = store.profiles.currentProfile;
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 20 }}>
 
             {/* Row 1: credentials (narrow) | server selector (wider) */}
             <div style={{ display: 'flex', gap: 10 }}>
@@ -169,7 +187,7 @@ const ProfileTab = observer(({ logMsg, setLogMsg }) => {
                         value={profile.credentials.login}
                         onChange={action(e => profile.credentials.login = e.target.value.trim())}
                     />
-                    <div className="form-label">Password</div>
+                    <div className="form-label" style={{ marginTop: 20 }}>Password</div>
                     <input
                         className="form-input"
                         type="password"
