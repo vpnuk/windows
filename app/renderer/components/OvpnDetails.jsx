@@ -10,6 +10,7 @@ const OvpnDetails = observer(() => {
 
     return (
         <div className="connection-details-wrapper">
+            <div className="form-label" style={{ marginBottom: 4 }}>Protocol</div>
             <Radio.Group
                 value={details.protocol}
                 onChange={action(e => {
@@ -22,6 +23,7 @@ const OvpnDetails = observer(() => {
                         {name}
                     </Radio.Button>)}
             </Radio.Group>
+            <div className="form-label" style={{ marginTop: 10, marginBottom: 4 }}>Port</div>
             <Radio.Group
                 value={details.port}
                 onChange={action(e => details.port = e.target.value)}
