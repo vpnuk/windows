@@ -1,9 +1,9 @@
 import { ipcRenderer } from 'electron';
-import React, { useState, useRef } from 'react';
+import React, { useRef } from 'react';
 import { toJS, runInAction }       from 'mobx';
 import { observer }                from 'mobx-react-lite';
 import { connectionStates, VpnType } from '@modules/constants.js';
-import { ConnectionStore, useStore, WvpnOptions } from '@domain';
+import { ConnectionStore, ConnectionLogStore, useStore, WvpnOptions } from '@domain';
 
 const { ensureWgConfig } = require('../wgApi');
 
@@ -55,27 +55,26 @@ const S = {
 const ConnectionButton = observer(() => {
     const profile = useStore().profiles.currentProfile;
 
-    const [stepLog,  setStepLog]  = useState([]);
-    const [errorMsg, setErrorMsg] = useState('');
-    const [busy,     setBusy]     = useState(false);
+    const [busy, setBusy] = React.useState(false);
     const logEndRef = useRef(null);
+
+    const stepLog  = ConnectionLogStore.steps;
+    const errorMsg = ConnectionLogStore.error;
 
     const pushStep = (msg) => {
         if (!msg) return;
-        setStepLog(prev => [...prev, msg]);
+        ConnectionLogStore.pushStep(msg);
         requestAnimationFrame(() => logEndRef.current?.scrollIntoView({ behavior: 'smooth' }));
     };
 
     const handleClick = async () => {
         if (ConnectionStore.state !== connectionStates.disconnected) {
             ipcRenderer.send('connection-stop');
-            setStepLog([]);
-            setErrorMsg('');
+            ConnectionLogStore.clear();
             return;
         }
 
-        setErrorMsg('');
-        setStepLog([]);
+        ConnectionLogStore.clear();
 
         const details = profile.details || {};
         const mtuVal  = details.mtu?.value;
@@ -152,7 +151,7 @@ const ConnectionButton = observer(() => {
                 clearInterval(clear);
             } else if (st === connectionStates.disconnected && seenConnecting) {
                 // Went back to disconnected without reaching connected — auth or tunnel failure.
-                setErrorMsg('Connection failed. Please check your username and password, then try again.');
+                ConnectionLogStore.setError('Connection failed. Please check your username and password, then try again.');
                 clearInterval(clear);
             } else if (ticks >= maxTicks) {
                 clearInterval(clear);
@@ -203,7 +202,7 @@ const ConnectionButton = observer(() => {
                         <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/>
                         <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
                     </svg>
-                    Live Help is on hand if you continue to have problems — use the Live Help tab above.
+                    Live Help is on hand if you continue to have problems — use the Live Help tab in the app settings or visit vpnuk.net.
                 </div>
                 </>
             ) : (
