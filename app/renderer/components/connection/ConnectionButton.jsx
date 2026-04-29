@@ -167,6 +167,7 @@ const ConnectionButton = observer(() => {
         <div>
             {/* ── Persistent status panel — always visible above the button ── */}
             {errorMsg ? (
+                <>
                 <div style={S.error}>
                     {stepLog.length > 0 && (
                         <div style={{ marginBottom: 4, opacity: 0.65, fontSize: 10 }}>
@@ -178,6 +179,33 @@ const ConnectionButton = observer(() => {
                     <strong style={{ display: 'block', marginBottom: 2 }}>{'\u26a0'} Error</strong>
                     {errorMsg}
                 </div>
+                {/* ── Live Help nudge — shown below error panel ── */}
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '5px 8px',
+                    marginBottom: 10,
+                    background: 'rgba(39,174,96,0.12)',
+                    border: '1px solid rgba(39,174,96,0.4)',
+                    borderRadius: 4,
+                    fontSize: 11,
+                    color: '#2ecc71',
+                }}>
+                    {/* Lifebuoy SVG */}
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                         stroke="#2ecc71" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                         style={{ flexShrink: 0 }}>
+                        <circle cx="12" cy="12" r="10"/>
+                        <circle cx="12" cy="12" r="4"/>
+                        <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/>
+                        <line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
+                        <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/>
+                        <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
+                    </svg>
+                    Live Help is on hand if you continue to have problems — use the Live Help tab above.
+                </div>
+                </>
             ) : (
                 <div style={S.log}>
                     {stepLog.length > 0 ? (
