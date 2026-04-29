@@ -253,11 +253,11 @@
 
 /* ─── Connection switch ──────────────────────────────────────────────────── */
 .switch {
-    width: 168px !important; height: 92px !important;
-    border-width: 3px !important; border-color: var(--border) !important;
+    width: 84px !important; height: 46px !important;
+    border-width: 2px !important; border-color: var(--border) !important;
     margin-bottom: 10px !important;
 }
-.switch.ant-switch::after { width: 84px; height: 84px; border-radius: 100%; }
+.switch.ant-switch::after { width: 40px; height: 40px; border-radius: 100%; }
 .ant-switch-checked { background-color: var(--connected) !important; }
 
 /* ─── Tabs ───────────────────────────────────────────────────────────────── */
