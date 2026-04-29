@@ -8,20 +8,25 @@ import { ConnectionStore, useStore, WvpnOptions } from '@domain';
 const { ensureWgConfig } = require('../wgApi');
 
 // ── Step-log panel styles ──────────────────────────────────────────────────────
+// Fixed height shared by both the log and error panel — must never change so
+// the layout doesn't shift as lines are added or scrollbars appear.
+const PANEL_HEIGHT = 108;
+
 const S = {
     log: {
         padding: '6px 8px',
         background: 'rgba(0,0,0,0.38)',
         border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 4,
-        minHeight: 88,
-        maxHeight: 120,
+        height: PANEL_HEIGHT,
         overflowY: 'auto',
+        overflowX: 'hidden',
         fontFamily: 'monospace',
         fontSize: 11,
         lineHeight: 1.6,
         color: '#90b8f8',
         marginBottom: 10,
+        boxSizing: 'border-box',
     },
     placeholder: {
         display: 'block',
@@ -35,12 +40,15 @@ const S = {
         background: 'rgba(231,76,60,0.15)',
         border: '1px solid rgba(231,76,60,0.45)',
         borderRadius: 4,
+        height: PANEL_HEIGHT,
+        overflowY: 'auto',
+        overflowX: 'hidden',
         fontSize: 11,
         color: '#e74c3c',
         wordBreak: 'break-word',
         whiteSpace: 'pre-wrap',
-        minHeight: 88,
         marginBottom: 10,
+        boxSizing: 'border-box',
     },
 };
 
