@@ -21,7 +21,8 @@ function createWindow() {
         webPreferences: {
             webSecurity: false,
             nodeIntegration: true,
-            nodeIntegrationInWorker: true
+            nodeIntegrationInWorker: true,
+            webviewTag: true
         }
     });
     window.connectionIsOk = false;
