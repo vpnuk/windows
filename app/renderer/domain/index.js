@@ -12,6 +12,7 @@ export { default as Profile } from './entity/Profile';
 export { StoreProvider, useStore } from './StoreProvider';
 
 export { default as RootStore } from './store/RootStore';
-export { default as ConnectionStore } from './store/ConnectionStore';
+export { default as ConnectionStore }    from './store/ConnectionStore';
+export { default as ConnectionLogStore } from './store/ConnectionLogStore';
 export { default as ProfileStore } from './store/ProfileStore';
 export { default as SettingsStore } from './store/SettingsStore';
