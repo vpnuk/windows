@@ -14,9 +14,9 @@ let window, tray;
 function createWindow() {
     window = new BrowserWindow({
         width: isDev ? 1280 : 580,
-        height: isDev ? 960 : 720,
+        height: isDev ? 960 : 735,
         minWidth: 580,
-        minHeight: 600,
+        minHeight: 615,
         icon: path.join(__dirname, '../../app/assets/icon.ico'),
         webPreferences: {
             webSecurity: false,
