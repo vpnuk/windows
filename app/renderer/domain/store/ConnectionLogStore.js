@@ -1,4 +1,4 @@
-import { makeAutoObservable, action } from 'mobx';
+import { makeAutoObservable } from 'mobx';
 
 class ConnectionLogStore {
     steps = [];
@@ -8,18 +8,18 @@ class ConnectionLogStore {
         makeAutoObservable(this);
     }
 
-    pushStep = action((msg) => {
+    pushStep(msg) {
         if (msg) this.steps.push(msg);
-    });
+    }
 
-    setError = action((msg) => {
+    setError(msg) {
         this.error = msg || '';
-    });
+    }
 
-    clear = action(() => {
+    clear() {
         this.steps = [];
         this.error = '';
-    });
+    }
 }
 
 export default new ConnectionLogStore();
