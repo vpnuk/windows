@@ -73,6 +73,16 @@ const applyMtu = (conf, mtuValue) => {
     return conf.replace(/(\[Interface\][^\n]*\n)/, `$1MTU = ${mtuValue}\n`);
 };
 
+// Inject or replace the DNS line in the [Interface] section.
+const applyDns = (conf, dnsAddresses) => {
+    if (!dnsAddresses || !dnsAddresses.length) return conf;
+    const dnsLine = `DNS = ${dnsAddresses.join(', ')}`;
+    if (/^DNS\s*=/m.test(conf)) return conf.replace(/^DNS\s*=.*/m, dnsLine);
+    // Prefer inserting after the Address line (always in [Interface])
+    if (/^Address\s*=/m.test(conf)) return conf.replace(/^(Address\s*=.*)/m, `$1\n${dnsLine}`);
+    return conf.replace(/(\[Interface\][^\n]*\n)/, `$1${dnsLine}\n`);
+};
+
 // Read Endpoint IP from a stored .conf file.
 const getConfEndpointIp = confPath => {
     try {
@@ -84,7 +94,7 @@ const getConfEndpointIp = confPath => {
 
 // ── Server API calls ──────────────────────────────────────────────────────────
 
-const fetchWgConfig = async ({ login, password, serverHost, mtuValue, confPath }) => {
+const fetchWgConfig = async ({ login, password, serverHost, mtuValue, dnsAddresses, confPath }) => {
     const deviceLabel = getDeviceLabel();
     const params = new URLSearchParams({
         action:       'get_config',
@@ -108,6 +118,7 @@ const fetchWgConfig = async ({ login, password, serverHost, mtuValue, confPath }
         let conf = response.data.config;
         conf = patchEndpointToIp(conf, serverHost);
         conf = applyMtu(conf, mtuValue);
+        conf = applyDns(conf, dnsAddresses);
         fs.writeFileSync(confPath, conf, 'utf-8');
         return { success: true };
     }
@@ -164,10 +175,12 @@ const ensureWgConfig = async (profile, onStatus) => {
     const serverType  = profile.serverType || 'shared';
     const isDedicated = serverType === 'dedicated' || serverType === 'dedicated11';
     const mtuValue    = (profile.details && profile.details.mtu && profile.details.mtu.value) || '';
+    const dnsValue    = (profile.details && profile.details.dns && profile.details.dns.value) || [];
 
     logToFile(profileId, `[wgApi] serverType=${serverType}  isDedicated=${isDedicated}`);
     logToFile(profileId, `[wgApi] server="${serverLabel}"  host=${serverHost || '(using dedicated)'}`);
     logToFile(profileId, `[wgApi] MTU=${mtuValue || '(auto)'}`);
+    logToFile(profileId, `[wgApi] DNS=${dnsValue.length ? dnsValue.join(', ') : '(server default)'}`);
 
     if (!serverHost && !isDedicated) {
         const err = 'Select a server in the Profile tab first.';
@@ -215,13 +228,16 @@ const ensureWgConfig = async (profile, onStatus) => {
     log(`${verb} WireGuard config for "${serverLabel}"\u2026`);
     logToFile(profileId, `[wgApi] Calling get_config  server=${serverHost || '(dedicated)'}`);
 
-    const result = await fetchWgConfig({ login, password, serverHost, mtuValue, confPath });
+    const result = await fetchWgConfig({ login, password, serverHost, mtuValue, dnsAddresses: dnsValue, confPath });
 
     if (!result.success) {
         logToFile(profileId, `[wgApi] get_config FAILED: ${result.error}`);
         return result;
     }
     logToFile(profileId, `[wgApi] get_config OK — conf written to ${confPath}`);
+
+    if (mtuValue) log(`Custom MTU (${mtuValue}) applied \u2713`);
+    if (dnsValue.length) log(`Custom DNS (${dnsValue.join(', ')}) applied \u2713`);
 
     // ── Internal IP uniqueness check ──────────────────────────────────────────
     // Each active WireGuard tunnel on Windows must use a unique internal IP.
@@ -247,7 +263,7 @@ const ensureWgConfig = async (profile, onStatus) => {
                     logToFile(profileId, `[wgApi] IP CONFLICT with ${otherType} conf — deleting and regenerating`);
                     await deleteWgConfig({ login, password, serverHost });
                     logToFile(profileId, `[wgApi] delete_config done (conflict resolution)`);
-                    const fresh = await fetchWgConfig({ login, password, serverHost, mtuValue, confPath });
+                    const fresh = await fetchWgConfig({ login, password, serverHost, mtuValue, dnsAddresses: dnsValue, confPath });
                     if (!fresh.success) {
                         logToFile(profileId, `[wgApi] Regeneration FAILED: ${fresh.error}`);
                         return fresh;
