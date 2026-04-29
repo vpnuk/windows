@@ -213,8 +213,8 @@
     background: linear-gradient(135deg, var(--bg) 0%, #0a1428 60%, #0d1a2e 100%);
 }
 .column { height: 100%; display: flex; flex-direction: column; }
-.column:nth-child(odd)  { width: 30%; }
-.column:nth-child(even) { width: 40%; }
+.column:nth-child(odd)  { width: 20%; }
+.column:nth-child(even) { width: 60%; }
 .column-block:nth-child(odd)  { height: 30%; }
 .column-block:nth-child(even) { height: 40%; }
 
