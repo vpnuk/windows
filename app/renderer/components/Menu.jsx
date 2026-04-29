@@ -139,12 +139,21 @@ const Menu = observer(() => {
                 </TabPane>
 
                 <TabPane tab="Live Help" key="livehelp">
-                    <div style={{ paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                             <button
-                                className="form-button-sm"
                                 onClick={() => ipcRenderer.send('open-live-help')}
                                 title="Open chat in a separate window so you can navigate the app freely"
+                                style={{
+                                    fontSize: 11,
+                                    padding: '3px 10px',
+                                    cursor: 'pointer',
+                                    border: '1px solid #555',
+                                    borderRadius: 3,
+                                    background: 'transparent',
+                                    color: '#ccc',
+                                    userSelect: 'none',
+                                }}
                             >
                                 ↗ Detach Chat
                             </button>
@@ -153,11 +162,12 @@ const Menu = observer(() => {
                             src={TAWK_URL}
                             style={{
                                 width: '100%',
-                                height: 'calc(100vh - 260px)',
-                                minHeight: 400,
+                                height: 'calc(100vh - 300px)',
+                                minHeight: 360,
                                 border: 'none',
                                 borderRadius: 4,
                                 background: '#fff',
+                                marginBottom: 14,
                             }}
                             allowpopups="true"
                         />
