@@ -84,9 +84,23 @@ const OvpnConfigEditor = () => {
 
     return (
         <div className="config-editor-wrapper" style={{ paddingTop: 8 }}>
-            <p style={{ color: '#6b8cad', fontSize: 12, margin: '0 0 8px' }}>
+            <p style={{ color: '#6b8cad', fontSize: 12, margin: '0 0 6px' }}>
                 Editing: OpenVPN configuration (.ovpn)
             </p>
+            <div style={{
+                background: 'rgba(255,193,7,0.08)',
+                border: '1px solid rgba(255,193,7,0.25)',
+                borderRadius: 4,
+                padding: '6px 10px',
+                fontSize: 11,
+                color: '#c8a84b',
+                marginBottom: 8,
+                lineHeight: 1.5,
+            }}>
+                <strong>Note:</strong> Your custom DNS and MTU settings (set in the Connection tab) are sent
+                directly to OpenVPN each time you connect — they don&apos;t appear in this config file.
+                This file shows the base configuration only.
+            </div>
             <textarea
                 className="config-editor-textarea"
                 value={content}
