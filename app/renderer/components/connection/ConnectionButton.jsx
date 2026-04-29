@@ -66,10 +66,20 @@ const ConnectionButton = observer(() => {
             return;
         }
 
-        // ── WireGuard: auto-fetch / verify config before connecting ──────────
-        if (profile.vpnType === VpnType.WireGuard.label) {
-            setErrorMsg('');
-            setStepLog([]);
+        setErrorMsg('');
+        setStepLog([]);
+
+        const details = profile.details || {};
+        const mtuVal  = details.mtu?.value;
+        const dnsVal  = details.dns?.value;
+        const hasMtu  = !!mtuVal;
+        const hasDns  = !!(dnsVal && dnsVal.length);
+        const vpnType = profile.vpnType;
+
+        pushStep('Connection initialised\u2026');
+
+        // ── WireGuard ─────────────────────────────────────────────────────────
+        if (vpnType === VpnType.WireGuard.label) {
             setBusy(true);
 
             let result;
@@ -90,10 +100,28 @@ const ConnectionButton = observer(() => {
 
             // Config is on disk — tell ConfigEditor to re-read it.
             runInAction(() => { profile.wgConfigFetched = !profile.wgConfigFetched; });
+
+            pushStep('Handing off to WireGuard service\u2026');
         }
 
-        setErrorMsg('');
-        pushStep(`Handing off to WireGuard service\u2026`);
+        // ── OpenVPN ───────────────────────────────────────────────────────────
+        else if (vpnType === VpnType.OpenVPN.label) {
+            if (hasMtu) pushStep(`Applying custom MTU (mss-fix ${mtuVal}) \u2713`);
+            if (hasDns) pushStep(`Applying custom DNS (${dnsVal.join(', ')}) \u2713`);
+
+            const protocol = details.protocol || 'TCP';
+            const port     = details.port     || '443';
+            const isObfs   = protocol === 'Obfuscation';
+            pushStep(`Connecting over ${isObfs ? 'TCP (obfuscated)' : protocol} port ${port}\u2026`);
+            pushStep('Handing off to OpenVPN service\u2026');
+        }
+
+        // ── Windows native VPN — IKEv2, L2TP, PPTP ───────────────────────────
+        else {
+            if (hasMtu) pushStep(`Applying custom MTU settings \u2713`);
+            if (hasDns) pushStep(`Applying custom DNS (${dnsVal.join(', ')}) \u2713`);
+            pushStep('Handing off to native VPN service\u2026');
+        }
 
         ipcRenderer.send('connection-start', {
             profile:     toJS(profile),
@@ -101,7 +129,7 @@ const ConnectionButton = observer(() => {
             wVpnOptions: toJS(WvpnOptions),
         });
 
-        // Once the state changes from disconnected, append a final line.
+        // Once the state changes from disconnected, append the connected line.
         const clear = setInterval(() => {
             if (ConnectionStore.state !== connectionStates.disconnected) {
                 pushStep(`Connected to ${profile.server?.label || 'server'} \u2713`);
