@@ -17,7 +17,7 @@ const Starting = ({ message = 'Starting...', type = 'loading' }) => {
                                 <img alt="vpnuk-shield" src={`${ShieldImage}`} />
                                 <span className="starting-text">{message}</span>
                                 {type === 'warning' && (
-                                    <div className="app-notification app-notification--warning" style={{ maxWidth: 320 }}>
+                                    <div className="app-notification app-notification--warning" style={{ maxWidth: 340, width: '100%' }}>
                                         <span className="app-notification-icon">⚠️</span>
                                         <div className="app-notification-body">
                                             <h4>No internet connection</h4>
@@ -26,7 +26,7 @@ const Starting = ({ message = 'Starting...', type = 'loading' }) => {
                                     </div>
                                 )}
                                 {type === 'error' && (
-                                    <div className="app-notification app-notification--error" style={{ maxWidth: 320 }}>
+                                    <div className="app-notification app-notification--error" style={{ maxWidth: 340, width: '100%' }}>
                                         <span className="app-notification-icon">🔴</span>
                                         <div className="app-notification-body">
                                             <h4>Connection issue</h4>
