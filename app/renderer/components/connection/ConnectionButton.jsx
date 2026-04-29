@@ -101,7 +101,7 @@ const ConnectionButton = observer(() => {
             setBusy(false);
 
             if (!result.success) {
-                setErrorMsg(result.error || 'Could not prepare WireGuard config.');
+                ConnectionLogStore.setError(result.error || 'Could not prepare WireGuard config.');
                 return;
             }
 
