@@ -1,3 +1,4 @@
+const cp = require('child_process');
 const {
     connectionStates,
     VpnType,
@@ -9,12 +10,57 @@ const { writeFileSync } = require('fs');
 const { encode, decode } = require('ini');
 const VpnBase = require('./VpnBase');
 
+// How often (ms) to poll the Windows VPN connection status for an unexpected drop.
+const DROP_POLL_INTERVAL = 5000;
+
 class WindowsVpn extends VpnBase {
     #ipseckey;
+    #connectionStatus;
+    #dropWatcher = null;
 
     constructor(profile, hooks, wVpnOptions) {
         super(profile, hooks);
         this.#ipseckey = wVpnOptions.ipseckey;
+        this.#connectionStatus = connectionStates.disconnected;
+    }
+
+    // ── Drop watcher ──────────────────────────────────────────────────────────
+    // Polls Get-VpnConnection every DROP_POLL_INTERVAL ms.
+    // If the connection status is no longer "Connected" while we believe we are
+    // connected, we fire disconnectedHook(false) so the kill switch stays active
+    // and the UI reflects the real state.
+    #startDropWatcher() {
+        this.#dropWatcher = setInterval(() => {
+            if (this.#connectionStatus !== connectionStates.connected) {
+                this.#stopDropWatcher();
+                return;
+            }
+            const result = cp.spawnSync(
+                'powershell',
+                [
+                    '-Command',
+                    `(Get-VpnConnection -Name '${this._name}' -ErrorAction SilentlyContinue).ConnectionStatus`
+                ],
+                { shell: false, timeout: 6000 }
+            );
+            const status = ('' + result.stdout).trim();
+            // If we get a non-empty result and it is not "Connected", treat as
+            // an unexpected drop. An empty result (command error) is ignored to
+            // avoid false positives when the system is busy.
+            if (status && status !== connectionStates.connected) {
+                this.#stopDropWatcher();
+                this.#connectionStatus = connectionStates.disconnected;
+                // intentional = false — tunnel dropped on its own
+                this._disconnectedHook?.(false);
+            }
+        }, DROP_POLL_INTERVAL);
+    }
+
+    #stopDropWatcher() {
+        if (this.#dropWatcher) {
+            clearInterval(this.#dropWatcher);
+            this.#dropWatcher = null;
+        }
     }
 
     async connect() {
@@ -25,28 +71,44 @@ class WindowsVpn extends VpnBase {
         if (await this.getConnectionStatus() === connectionStates.disconnected) {
             await this.#removeConnection();
         }
+        // L2TP/IPSec requires specific registry settings and the Policy Agent
+        // service to be running.  Set them now, before creating the connection.
+        if (this.type === VpnType.L2TP.label) {
+            this.#prepareL2tp();
+        }
         await this.#addConnection();
         await this.#setDns();
         await this.#vpnConnect();
         if (await this.getConnectionStatus() === connectionStates.connected) {
+            this.#connectionStatus = connectionStates.connected;
             this._connectedHook?.();
+            // Start watching for unexpected drops.
+            this.#startDropWatcher();
         }
         else {
             await this.#removeConnection();
-            this._disconnectedHook?.();
+            this.#connectionStatus = connectionStates.disconnected;
+            // intentional = true — connection never established, treat as expected failure
+            this._disconnectedHook?.(true);
             this._logStream.end();
             this._errorHook?.(new Error(`${this._name} connection error.`));
         }
     }
 
     async disconnect() {
+        // Stop the drop watcher FIRST so it does not fire a false unexpected-drop
+        // event while we are tearing the connection down intentionally.
+        this.#stopDropWatcher();
+
         if (await this.getConnectionStatus() === connectionStates.connected) {
             await this.#rasdialDisconnect();
         }
         if (await this.getConnectionStatus() === connectionStates.disconnected) {
             await this.#removeConnection();
         }
-        this._disconnectedHook?.();
+        this.#connectionStatus = connectionStates.disconnected;
+        // intentional = true — user initiated this disconnect
+        this._disconnectedHook?.(true);
         this._logStream.end();
     }
 
@@ -64,23 +126,86 @@ class WindowsVpn extends VpnBase {
 
     async #removeConnection() {
         return await this.#logSpawn('powershell', [
-            'Remove-VpnConnection -Name', this._name, '-Force'
+            'Remove-VpnConnection', '-Name', this._name, '-Force'
         ]);
     }
 
+    // ── L2TP/IPSec pre-flight ─────────────────────────────────────────────────
+    // L2TP/IPSec with a pre-shared key fails silently from behind NAT unless
+    // the AssumeUDPEncapsulationContextOnSendRule registry value is set to 2.
+    // This is one of the most common reasons L2TP won't connect on Windows.
+    // We also ensure the IPSec Policy Agent service is running — without it the
+    // IKE handshake cannot complete.
+    #prepareL2tp() {
+        // Set NAT-T registry key (no reboot required — effective on next dial)
+        cp.spawnSync('reg', [
+            'add',
+            'HKLM\\SYSTEM\\CurrentControlSet\\Services\\PolicyAgent',
+            '/v', 'AssumeUDPEncapsulationContextOnSendRule',
+            '/t', 'REG_DWORD',
+            '/d', '2',
+            '/f'
+        ], { shell: true });
+
+        // Ensure L2TP is not blocked by RasMan IPSec prohibition flag
+        cp.spawnSync('reg', [
+            'add',
+            'HKLM\\SYSTEM\\CurrentControlSet\\Services\\RasMan\\Parameters',
+            '/v', 'ProhibitIpSec',
+            '/t', 'REG_DWORD',
+            '/d', '0',
+            '/f'
+        ], { shell: true });
+
+        // Start the IPSec Policy Agent service if it is not already running
+        cp.spawnSync('sc', ['start', 'PolicyAgent'], { shell: true, timeout: 8000 });
+    }
+
     async #addConnection() {
-        return await this.#logSpawn('powershell', [
+        // IKEv2 MUST use the DNS hostname — never the raw IP address.
+        // The certificate's CN/SAN is matched against the hostname; using the
+        // IP would fail certificate validation and prevent the handshake.
+        let serverAddress;
+        if (this.type === VpnType.IKEv2.label) {
+            if (!this._server.dns) {
+                throw new Error(
+                    'IKEv2 requires a server hostname but none is set for this server. ' +
+                    'Please contact VPNUK support.'
+                );
+            }
+            serverAddress = this._server.dns;
+        } else {
+            serverAddress = this._server.host;
+        }
+
+        // Build the Add-VpnConnection argument list with each parameter and
+        // its value as separate array elements.  Combining them into a single
+        // string (e.g. '-L2tpPsk key') causes PowerShell to treat the whole
+        // thing as one token and silently ignores the value.
+        const args = [
             'Add-VpnConnection',
-            '-Name', this._name,
-            '-TunnelType', this.type,
-            '-ServerAddress', this.type === VpnType.IKEv2.label
-                ? this._server.dns : this._server.host,
-            this.type === VpnType.L2TP.label
-                ? `-L2tpPsk ${this.#ipseckey}` : '',
-            this.type !== VpnType.IKEv2.label
-                ? '-AuthenticationMethod Chap, MsChapv2' : '',
-            '-Force -RememberCredential -PassThru'
-        ]);
+            '-Name',          this._name,
+            '-TunnelType',    this.type,
+            '-ServerAddress', serverAddress,
+            '-Force',
+            '-RememberCredential',
+            '-PassThru',
+        ];
+
+        if (this.type === VpnType.L2TP.label) {
+            // PSK for the IPSec phase — must be a separate named parameter+value.
+            args.push('-L2tpPsk',            this.#ipseckey);
+            // Allow PAP, CHAP, and MS-CHAPv2 for the PPP authentication phase.
+            // Servers typically require at least one of these; PAP is common.
+            args.push('-AuthenticationMethod', 'Pap,Chap,MsChapv2');
+            // Optional encryption avoids handshake failures caused by mismatched
+            // cipher negotiation — the IPSec layer already encrypts the tunnel.
+            args.push('-EncryptionLevel',      'Optional');
+        } else if (this.type !== VpnType.IKEv2.label) {
+            args.push('-AuthenticationMethod', 'Chap,MsChapv2');
+        }
+
+        return await this.#logSpawn('powershell', args);
     }
 
     async #vpnConnect() {
@@ -116,6 +241,6 @@ class WindowsVpn extends VpnBase {
         this._logStream.write(result);
         return result;
     }
-};
+}
 
 module.exports = WindowsVpn;
