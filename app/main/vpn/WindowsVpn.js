@@ -233,15 +233,18 @@ class WindowsVpn extends VpnBase {
     }
 
     async #setDns() {
-        if (!this._dns.value) {
-            return;
-        }
-        // todo: ? try-catch phoneBookPath file exists
+        // IpPrioritizeRemote = 1 forces all traffic through the VPN gateway
+        // (equivalent to turning off split tunnelling at the phonebook level).
+        // This MUST be written unconditionally — if it is skipped because the
+        // server has no DNS configured, the tunnel comes up but traffic is never
+        // routed through it.
         let phoneBook = decode(await readFile(phoneBookPath, 'utf-8'));
         phoneBook[this._name].IpPrioritizeRemote = '1';
-        phoneBook[this._name].IpDnsAddress = this._dns.value[0];
-        phoneBook[this._name].IpDns2Address = this._dns.value[1];
-        phoneBook[this._name].IpNameAssign = '2';
+        if (this._dns.value) {
+            phoneBook[this._name].IpDnsAddress  = this._dns.value[0];
+            phoneBook[this._name].IpDns2Address = this._dns.value[1];
+            phoneBook[this._name].IpNameAssign  = '2';
+        }
         let result = encode(phoneBook);
         writeFileSync(phoneBookPath, result, 'utf-8');
     }
