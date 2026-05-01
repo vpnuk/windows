@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu } = require('electron');
 const path = require('path');
+const fsSync = require('fs');
 const AppTray = require('./tray');
 const { enableAutoUpdate } = require("./updater");
 const ElectronStore = require('electron-store');
@@ -99,6 +100,27 @@ if (gotTheLock) {
     })
 
     app.on('ready', () => {
+        // ── Kill-switch crash recovery ────────────────────────────────────────
+        // If the app was killed or crashed while the kill switch was active the
+        // default route was left deleted and the user has no internet access.
+        // Check the persisted state file and restore the route before doing
+        // anything else, then re-enable IPv6.
+        try {
+            const { settingsFolder } = require('../modules/constants');
+            const { addRouteSync, defaultRoute, enableAllIPv6 } = require('./utils/routing');
+            const ksPath = path.join(settingsFolder, 'ks.json');
+            if (fsSync.existsSync(ksPath)) {
+                const ks = JSON.parse(fsSync.readFileSync(ksPath, 'utf-8'));
+                if (ks.active && ks.gateway) {
+                    addRouteSync(defaultRoute, ks.gateway, defaultRoute);
+                    enableAllIPv6();
+                }
+                // Clear the active flag — we are starting fresh.
+                fsSync.writeFileSync(ksPath, JSON.stringify({ active: false }), 'utf-8');
+            }
+        } catch { /* best-effort — file may not exist on first run */ }
+
+        // ── WireGuard orphan cleanup ──────────────────────────────────────────
         // Clean up any WireGuard tunnel services left over from a previous
         // session (crash, force-close, etc.) before the UI loads.
         try {
@@ -106,7 +128,6 @@ if (gotTheLock) {
             const { checkWireGuardInstalled } = require('./vpn/WireGuard');
             if (checkWireGuardInstalled()) {
                 const cp   = require('child_process');
-                const path = require('path');
                 const regResult = cp.spawnSync(
                     'cmd',
                     ['/c', 'reg', 'query', 'HKLM\\SOFTWARE\\WireGuard', '/v', 'InstallationDirectory'],
