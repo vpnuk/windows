@@ -81,6 +81,10 @@ class WindowsVpn extends VpnBase {
             this.#preparePptp();
         }
         await this.#addConnection();
+        // Explicitly register a default route through this connection so all
+        // traffic is sent through the VPN.  More reliable than the phonebook
+        // IpPrioritizeRemote flag alone, especially for L2TP on some systems.
+        await this.#setDefaultRoute();
         await this.#setDns();
         await this.#vpnConnect();
         if (await this.getConnectionStatus() === connectionStates.connected) {
@@ -218,13 +222,47 @@ class WindowsVpn extends VpnBase {
         ]);
     }
 
+    async #setDefaultRoute() {
+        // Store a 0.0.0.0/0 route in the connection profile so Windows adds it
+        // to the routing table the moment the tunnel comes up.  This is more
+        // reliable than the IpPrioritizeRemote phonebook flag for L2TP/IKEv2.
+        // Non-fatal: PPTP and some L2TP servers push a default route themselves.
+        try {
+            await this.#logSpawn('powershell', [
+                'Add-VpnConnectionRoute',
+                `-ConnectionName ${this._name}`,
+                '-DestinationPrefix 0.0.0.0/0'
+            ]);
+        } catch { /* non-fatal */ }
+    }
+
     async #vpnConnect() {
-        return await this.#logSpawn('powershell', [
-            'Connect-Vpn',
-            this._name,
-            this._credentials.login,
-            this._credentials.password
-        ]);
+        // Connect-Vpn (DotRas RasDialer) can hang indefinitely if the IKEv2
+        // handshake stalls or the server stops responding mid-negotiation.
+        // Kill the process after 45 s and let the caller treat it as a failure.
+        const TIMEOUT_MS = 45_000;
+        return new Promise((resolve, reject) => {
+            const child = cp.spawn('powershell', [
+                'Connect-Vpn',
+                this._name,
+                this._credentials.login,
+                this._credentials.password,
+            ]);
+            let stdout = '';
+            let stderr = '';
+            child.stdout.on('data', chunk => { stdout += chunk; });
+            child.stderr.on('data', chunk => { stderr += chunk; });
+            const timer = setTimeout(() => {
+                child.kill();
+                reject(new Error('VPN connection timed out after 45 seconds'));
+            }, TIMEOUT_MS);
+            child.on('close', code => {
+                clearTimeout(timer);
+                this._logStream.write(stdout);
+                if (code) reject(new Error(`Subprocess exited with error ${code}:\n${stderr}`));
+                else resolve(stdout);
+            });
+        });
     }
 
     async #rasdialDisconnect() {
