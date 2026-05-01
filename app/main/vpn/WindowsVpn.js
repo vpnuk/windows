@@ -257,17 +257,84 @@ class WindowsVpn extends VpnBase {
         ]);
 
         this.#log(`ADD-CONNECTION output: ${result?.trim() || '(none)'}`);
+
+        // For IKEv2 — override the default PEAP-MSCHAPv2 EAP config that Windows
+        // sets automatically with raw EAP-MSCHAPv2 (type 26, no PEAP wrapper).
+        // VPNUK's IKEv2 server expects the unwrapped type; sending PEAP causes
+        // the "Invalid payload received" handshake failure we were seeing.
+        if (this.type === VpnType.IKEv2.label) {
+            this.#log('IKEv2 — overriding EAP config to raw MSCHAPv2 (type 26)');
+            await this.#setIkev2EapConfig();
+        }
+
         return result;
+    }
+
+    async #setIkev2EapConfig() {
+        // EAP type 26 = EAP-MSCHAPv2 (raw, no PEAP wrapper).
+        // Windows defaults to type 25 (PEAP) when AuthenticationMethod=Eap is set
+        // via Add-VpnConnection.  IKEv2 servers that use EAP-MSCHAPv2 directly
+        // reject PEAP with an IKEv2 "Invalid payload received" error.
+        const eapXml = [
+            '<?xml version="1.0"?>',
+            '<EapHostConfig xmlns="http://www.microsoft.com/provisioning/EapHostConfig">',
+            '  <EapMethod>',
+            '    <Type xmlns="http://www.microsoft.com/provisioning/EapCommon">26</Type>',
+            '    <VendorId xmlns="http://www.microsoft.com/provisioning/EapCommon">0</VendorId>',
+            '    <VendorType xmlns="http://www.microsoft.com/provisioning/EapCommon">0</VendorType>',
+            '    <AuthorId xmlns="http://www.microsoft.com/provisioning/EapCommon">0</AuthorId>',
+            '  </EapMethod>',
+            '  <Config xmlns="http://www.microsoft.com/provisioning/MsChapV2ConnectionPropertiesV1">',
+            '    <MsChapV2Properties>',
+            '      <UseWinlogonCredentials>false</UseWinlogonCredentials>',
+            '    </MsChapV2Properties>',
+            '  </Config>',
+            '</EapHostConfig>',
+        ].join('');
+
+        // Write to a temp file to avoid PowerShell quoting issues with the XML string.
+        const tmpPath = '%TEMP%\\vpnuk_ikev2_eap.xml';
+        const cmd =
+            `Set-Content -Path '${tmpPath}' -Value '${eapXml}' -Encoding UTF8;` +
+            ` $doc = [xml](Get-Content -Path '${tmpPath}' -Encoding UTF8);` +
+            ` Set-VpnConnectionEapConfiguration -ConnectionName '${this._name}'` +
+            `   -EapConfigXmlStream $doc -Force;` +
+            ` Write-Output "EAP-CONFIG-SET"`;
+
+        try {
+            const result = await this.#logSpawn('powershell', ['-Command', cmd]);
+            this.#log(`IKEv2-EAP result: ${result?.trim() || '(none)'}`);
+        } catch (err) {
+            this.#log(`IKEv2-EAP config error (non-fatal): ${err.message}`);
+        }
     }
 
     #applyPostConnectRoute() {
         this.#log(`POST-ROUTE looking up adapter name="${this._name}"`);
+        // Strategy 1 — exact name match (works for IKEv2, may not for L2TP PPP adapters).
+        // Strategy 2 — /32 point-to-point address fallback: every PPP tunnel (L2TP, PPTP)
+        //              gets a /32 remote address; nothing else on a normal Windows machine does.
         const cmd =
-            `$adapter = Get-NetAdapter -Name '${this._name}' -ErrorAction SilentlyContinue;` +
-            ` if ($adapter) { Write-Output "FOUND ifIndex=$($adapter.ifIndex) status=$($adapter.Status)";` +
-            ` New-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0'` +
-            ` -RouteMetric 5 -ErrorAction SilentlyContinue;` +
-            ` Write-Output "ROUTE-ADDED" } else { Write-Output "ADAPTER-NOT-FOUND" }`;
+            // Diagnostic: list all adapters so we can see what Windows actually calls them.
+            `$all = (Get-NetAdapter | ForEach-Object { "$($_.Name)=[$($_.Status)]" }) -join ', ';` +
+            ` Write-Output "ALL-ADAPTERS: $all";` +
+            // Strategy 1: exact name.
+            ` $adapter = Get-NetAdapter -Name '${this._name}' -ErrorAction SilentlyContinue;` +
+            ` if ($adapter) {` +
+            `   Write-Output "FOUND-BY-NAME ifIndex=$($adapter.ifIndex) status=$($adapter.Status)";` +
+            `   New-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -RouteMetric 5 -ErrorAction SilentlyContinue;` +
+            `   Write-Output "ROUTE-ADDED"; return` +
+            ` };` +
+            // Strategy 2: /32 PPP point-to-point address.
+            ` $ppp = Get-NetIPAddress -AddressFamily IPv4 -PrefixLength 32 -ErrorAction SilentlyContinue` +
+            `   | Where-Object { $_.InterfaceAlias -notlike 'Loopback*' }` +
+            `   | Select-Object -First 1;` +
+            ` if ($ppp) {` +
+            `   Write-Output "FOUND-BY-PPP ifIndex=$($ppp.InterfaceIndex) alias=$($ppp.InterfaceAlias) addr=$($ppp.IPAddress)";` +
+            `   New-NetRoute -InterfaceIndex $ppp.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -RouteMetric 5 -ErrorAction SilentlyContinue;` +
+            `   Write-Output "ROUTE-ADDED"; return` +
+            ` };` +
+            ` Write-Output "ADAPTER-NOT-FOUND"`;
 
         const r = cp.spawnSync('powershell', ['-Command', cmd], { timeout: 10_000 });
         const out = r.stdout?.toString().trim() || '';
@@ -320,6 +387,18 @@ class WindowsVpn extends VpnBase {
     }
 
     async #setDns() {
+        // IpPrioritizeRemote is a PPP-level phonebook flag — it only applies to
+        // PPTP and L2TP connections.  For IKEv2, routing is fully handled by
+        // SplitTunneling=False and the post-connect route we add explicitly.
+        // More importantly, the ini round-trip (decode → mutate → encode) risks
+        // corrupting the CustomAuthData blob that holds the EAP XML config — which
+        // is exactly what causes the "Invalid payload received" handshake failure.
+        // Skip the phonebook write entirely for IKEv2.
+        if (this.type === VpnType.IKEv2.label) {
+            this.#log('SET-DNS skipping phonebook write for IKEv2 (not applicable; avoids EAP config corruption)');
+            return;
+        }
+
         this.#log(`SET-DNS reading phonebook from ${phoneBookPath}`);
         let phoneBook = decode(await readFile(phoneBookPath, 'utf-8'));
 
