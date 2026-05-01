@@ -306,6 +306,8 @@ send:
         ${NSD_CreateLabel} 0u 0u 100% 12u "Select WireGuard to use:"
         Pop $wgHwnd
 
+        ; "Install WireGuard X" — only shown when the bundled version differs
+        ; from what is already installed (or nothing is installed yet).
         StrCmp $wgPath "" +2 0
         StrCmp $wgVersion $installedWgVer wg_install_end 0
         ${NSD_CreateRadioButton} 12u "$wgHeight\u" 100% 12u "Install WireGuard $wgVersion"
@@ -316,15 +318,19 @@ send:
         StrCpy $wgRadioValue "true"
     wg_install_end:
 
+        ; "Use Existing WireGuard" — shown whenever WireGuard is already present.
+        ; Label intentionally omits the version to avoid showing "unknown" when
+        ; the registry entry is missing.  This option is always pre-selected when
+        ; it is available — most users should keep their existing installation.
         StrCmp $wgPath "" wg_use_end 0
-        ${NSD_CreateRadioButton} 12u "$wgHeight\u" 100% 12u "Use installed WireGuard $installedWgVer"
+        ${NSD_CreateRadioButton} 12u "$wgHeight\u" 100% 12u "Use Existing WireGuard"
         Pop $wgHwnd
         nsDialogs::SetUserData $wgHwnd "false"
         ${NSD_OnClick} $wgHwnd wgRadioBtnClick
+        ${NSD_Check} $wgHwnd        ; pre-select this option — preferred default
         StrCpy $wgRadioValue "false"
     wg_use_end:
 
-        ${NSD_Check} $wgHwnd
         nsDialogs::Show
     FunctionEnd
 
