@@ -13,6 +13,11 @@ const VpnBase = require('./VpnBase');
 // How often (ms) to poll the Windows VPN connection status for an unexpected drop.
 const DROP_POLL_INTERVAL = 5000;
 
+// Timestamp prefix for every log line written by this module.
+function ts() {
+    return new Date().toISOString();
+}
+
 class WindowsVpn extends VpnBase {
     #ipseckey;
     #connectionStatus;
@@ -24,12 +29,18 @@ class WindowsVpn extends VpnBase {
         this.#connectionStatus = connectionStates.disconnected;
     }
 
+    // ── Logging ───────────────────────────────────────────────────────────────
+    #log(msg) {
+        this._logStream.write(`[${ts()}] ${msg}\n`);
+    }
+
     // ── Drop watcher ──────────────────────────────────────────────────────────
     // Polls Get-VpnConnection every DROP_POLL_INTERVAL ms.
     // If the connection status is no longer "Connected" while we believe we are
     // connected, we fire disconnectedHook(false) so the kill switch stays active
     // and the UI reflects the real state.
     #startDropWatcher() {
+        this.#log(`DROP-WATCHER start — polling every ${DROP_POLL_INTERVAL}ms`);
         this.#dropWatcher = setInterval(() => {
             if (this.#connectionStatus !== connectionStates.connected) {
                 this.#stopDropWatcher();
@@ -44,13 +55,13 @@ class WindowsVpn extends VpnBase {
                 { shell: false, timeout: 6000 }
             );
             const status = ('' + result.stdout).trim();
-            // If we get a non-empty result and it is not "Connected", treat as
-            // an unexpected drop. An empty result (command error) is ignored to
-            // avoid false positives when the system is busy.
+            const stderr = ('' + result.stderr).trim();
+            if (stderr) this.#log(`DROP-WATCHER poll error: ${stderr}`);
+            this.#log(`DROP-WATCHER poll → status="${status || '(empty)'}"`);
             if (status && status !== connectionStates.connected) {
+                this.#log(`DROP-WATCHER detected unexpected drop (status="${status}") — firing disconnectedHook`);
                 this.#stopDropWatcher();
                 this.#connectionStatus = connectionStates.disconnected;
-                // intentional = false — tunnel dropped on its own
                 this._disconnectedHook?.(false);
             }
         }, DROP_POLL_INTERVAL);
@@ -64,51 +75,71 @@ class WindowsVpn extends VpnBase {
     }
 
     async connect() {
+        this.#log(`=== CONNECT START — type=${this.type} name=${this._name} server=${this._server?.host} ===`);
         this._connectingHook?.();
-        if (await this.getConnectionStatus() === connectionStates.connected) {
+
+        const priorStatus = await this.getConnectionStatus();
+        this.#log(`Pre-connect status check → "${priorStatus}"`);
+        if (priorStatus === connectionStates.connected) {
+            this.#log('Existing connection detected — running rasdial /d to tear it down');
             await this.#rasdialDisconnect();
         }
-        if (await this.getConnectionStatus() === connectionStates.disconnected) {
+        const afterDisc = await this.getConnectionStatus();
+        this.#log(`Status after disconnect → "${afterDisc}"`);
+        if (afterDisc === connectionStates.disconnected) {
+            this.#log('Removing stale connection profile');
             await this.#removeConnection();
         }
-        // L2TP/IPSec requires specific registry settings and the Policy Agent
-        // service to be running.  Set them now, before creating the connection.
+
         if (this.type === VpnType.L2TP.label) {
+            this.#log('Running L2TP pre-flight (registry NAT-T + ProhibitIpSec + PolicyAgent)');
             this.#prepareL2tp();
         }
-        // PPTP requires firewall rules for TCP 1723 and GRE (protocol 47).
         if (this.type === VpnType.PPTP.label) {
+            this.#log('Running PPTP pre-flight (firewall rules TCP-1723 + GRE-47)');
             this.#preparePptp();
         }
+
         try {
+            this.#log('STEP 1 — Add-VpnConnection (creating profile)');
             await this.#addConnection();
-            // Set the default route synchronously (spawnSync with timeout) so
-            // it cannot block the flow if the VPN service is unresponsive.
-            this.#setDefaultRoute();
+            this.#log('STEP 1 complete — profile created');
+
+            this.#log('STEP 2 — Writing phonebook (IpPrioritizeRemote + DNS)');
             await this.#setDns();
-            // 45-second timeout — throws if the handshake stalls.
+            this.#log('STEP 2 complete — phonebook written');
+
+            this.#log('STEP 3 — Connect-Vpn (45 s timeout)');
             await this.#vpnConnect();
+            this.#log('STEP 3 complete — Connect-Vpn returned without error');
         } catch (err) {
-            // Any failure in setup or the connect call lands here.
-            // Clean up and surface the error so the UI unblocks.
+            this.#log(`CONNECT FAILED — ${err.message}`);
             this.#stopDropWatcher();
-            await this.#removeConnection().catch(() => {});
+            await this.#removeConnection().catch(e => this.#log(`cleanup removeConnection error: ${e.message}`));
             this.#connectionStatus = connectionStates.disconnected;
             this._disconnectedHook?.(true);
             this._logStream.end();
             this._errorHook?.(err);
             return;
         }
-        if (await this.getConnectionStatus() === connectionStates.connected) {
+
+        const finalStatus = await this.getConnectionStatus();
+        this.#log(`Post-connect status check → "${finalStatus}"`);
+
+        if (finalStatus === connectionStates.connected) {
             this.#connectionStatus = connectionStates.connected;
+            if (this.type === VpnType.L2TP.label || this.type === VpnType.IKEv2.label) {
+                this.#log('STEP 4 — Applying post-connect default route to active routing table');
+                this.#applyPostConnectRoute();
+            }
+            this.#log('=== CONNECT SUCCESS ===');
             this._connectedHook?.();
-            // Start watching for unexpected drops.
             this.#startDropWatcher();
         }
         else {
-            await this.#removeConnection().catch(() => {});
+            this.#log(`CONNECT FAILED — status after connect is "${finalStatus}" not Connected`);
+            await this.#removeConnection().catch(e => this.#log(`cleanup removeConnection error: ${e.message}`));
             this.#connectionStatus = connectionStates.disconnected;
-            // intentional = true — connection never established, treat as expected failure
             this._disconnectedHook?.(true);
             this._logStream.end();
             this._errorHook?.(new Error(`${this._name} connection error.`));
@@ -116,18 +147,23 @@ class WindowsVpn extends VpnBase {
     }
 
     async disconnect() {
-        // Stop the drop watcher FIRST so it does not fire a false unexpected-drop
-        // event while we are tearing the connection down intentionally.
+        this.#log('=== DISCONNECT START ===');
         this.#stopDropWatcher();
 
-        if (await this.getConnectionStatus() === connectionStates.connected) {
+        const status = await this.getConnectionStatus();
+        this.#log(`Status at disconnect → "${status}"`);
+        if (status === connectionStates.connected) {
+            this.#log('Calling rasdial /d');
             await this.#rasdialDisconnect();
         }
-        if (await this.getConnectionStatus() === connectionStates.disconnected) {
+        const statusAfter = await this.getConnectionStatus();
+        this.#log(`Status after rasdial /d → "${statusAfter}"`);
+        if (statusAfter === connectionStates.disconnected) {
+            this.#log('Removing connection profile');
             await this.#removeConnection();
         }
         this.#connectionStatus = connectionStates.disconnected;
-        // intentional = true — user initiated this disconnect
+        this.#log('=== DISCONNECT COMPLETE ===');
         this._disconnectedHook?.(true);
         this._logStream.end();
     }
@@ -151,76 +187,63 @@ class WindowsVpn extends VpnBase {
     }
 
     // ── L2TP/IPSec pre-flight ─────────────────────────────────────────────────
-    // L2TP/IPSec with a pre-shared key fails silently from behind NAT unless
-    // the AssumeUDPEncapsulationContextOnSendRule registry value is set to 2.
-    // This is one of the most common reasons L2TP won't connect on Windows.
-    // We also ensure the IPSec Policy Agent service is running — without it the
-    // IKE handshake cannot complete.
     #prepareL2tp() {
-        // Set NAT-T registry key (no reboot required — effective on next dial)
-        cp.spawnSync('reg', [
+        let r;
+
+        r = cp.spawnSync('reg', [
             'add',
             'HKLM\\SYSTEM\\CurrentControlSet\\Services\\PolicyAgent',
             '/v', 'AssumeUDPEncapsulationContextOnSendRule',
-            '/t', 'REG_DWORD',
-            '/d', '2',
-            '/f'
+            '/t', 'REG_DWORD', '/d', '2', '/f'
         ], { shell: true });
+        this.#log(`L2TP-PREP reg AssumeUDPEncapsulationContextOnSendRule=2 → exit ${r.status} ${r.stderr?.toString().trim() || ''}`);
 
-        // Ensure L2TP is not blocked by RasMan IPSec prohibition flag
-        cp.spawnSync('reg', [
+        r = cp.spawnSync('reg', [
             'add',
             'HKLM\\SYSTEM\\CurrentControlSet\\Services\\RasMan\\Parameters',
             '/v', 'ProhibitIpSec',
-            '/t', 'REG_DWORD',
-            '/d', '0',
-            '/f'
+            '/t', 'REG_DWORD', '/d', '0', '/f'
         ], { shell: true });
+        this.#log(`L2TP-PREP reg ProhibitIpSec=0 → exit ${r.status} ${r.stderr?.toString().trim() || ''}`);
 
-        // Start the IPSec Policy Agent service if it is not already running
-        cp.spawnSync('sc', ['start', 'PolicyAgent'], { shell: true, timeout: 8000 });
+        r = cp.spawnSync('sc', ['start', 'PolicyAgent'], { shell: true, timeout: 8000 });
+        this.#log(`L2TP-PREP sc start PolicyAgent → exit ${r.status} ${r.stderr?.toString().trim() || ''}`);
     }
 
     // ── PPTP pre-flight ───────────────────────────────────────────────────────
-    // PPTP uses TCP 1723 for the control channel AND GRE (IP protocol 47) for
-    // the data channel.  Machines with strict Windows Firewall outbound rules
-    // silently block GRE, so the user sees a connection attempt that hangs and
-    // eventually times out.  We add outbound allow rules for both before dialling.
-    // These are idempotent — deleting before adding means no duplicate rules pile up.
     #preparePptp() {
         const rules = [
-            // name                  protocol  remoteport
-            ['VPNUK-PPTP-TCP-1723', 'TCP',    '1723'],
-            ['VPNUK-PPTP-GRE-47',   '47',      null ],   // GRE has no port concept
+            ['VPNUK-PPTP-TCP-1723', 'TCP', '1723'],
+            ['VPNUK-PPTP-GRE-47',   '47',   null ],
         ];
         for (const [name, proto, port] of rules) {
-            cp.spawnSync('netsh', [
+            let r = cp.spawnSync('netsh', [
                 'advfirewall', 'firewall', 'delete', 'rule', `name=${name}`
             ], { shell: true });
+            this.#log(`PPTP-PREP firewall delete ${name} → exit ${r.status}`);
+
             const add = [
                 'advfirewall', 'firewall', 'add', 'rule',
                 `name=${name}`, 'dir=out', 'action=allow', `protocol=${proto}`,
             ];
             if (port) add.push(`remoteport=${port}`);
-            cp.spawnSync('netsh', add, { shell: true });
+            r = cp.spawnSync('netsh', add, { shell: true });
+            this.#log(`PPTP-PREP firewall add ${name} proto=${proto} → exit ${r.status} ${r.stderr?.toString().trim() || ''}`);
         }
     }
 
     async #addConnection() {
-        // IKEv2 MUST use the DNS hostname — never the raw IP address.
-        // The certificate CN/SAN is validated against the hostname; an IP address
-        // fails the TLS handshake.  Fall back to host if no DNS is configured so
-        // the connection is still attempted (it will fail cert validation, but at
-        // least it gets that far rather than erroring out here).
         const serverAddress = this.type === VpnType.IKEv2.label
             ? (this._server.dns || this._server.host)
             : this._server.host;
 
-        // Keep the same argument format as the original working code.
-        // PowerShell's implicit command mode concatenates all argv elements with
-        // spaces into one command string, so multi-word elements like
-        // '-Force -RememberCredential -PassThru' expand correctly.
-        return await this.#logSpawn('powershell', [
+        const authMethod = this.type === VpnType.IKEv2.label
+            ? 'Eap'
+            : 'Chap, MsChapv2';
+
+        this.#log(`ADD-CONNECTION TunnelType=${this.type} ServerAddress=${serverAddress} AuthMethod=${authMethod}${this.type === VpnType.L2TP.label ? ' L2tpPsk=***' : ''}`);
+
+        const result = await this.#logSpawn('powershell', [
             'Add-VpnConnection',
             '-Name', this._name,
             '-TunnelType', this.type,
@@ -228,32 +251,35 @@ class WindowsVpn extends VpnBase {
             this.type === VpnType.L2TP.label
                 ? `-L2tpPsk ${this.#ipseckey}` : '',
             this.type === VpnType.IKEv2.label
-                ? '-AuthenticationMethod EapMSChapv2'
+                ? '-AuthenticationMethod Eap'
                 : '-AuthenticationMethod Chap, MsChapv2',
             '-Force -RememberCredential -PassThru'
         ]);
+
+        this.#log(`ADD-CONNECTION output: ${result?.trim() || '(none)'}`);
+        return result;
     }
 
-    #setDefaultRoute() {
-        // Store a 0.0.0.0/0 route in the connection profile so Windows adds it
-        // to the routing table the moment the tunnel comes up.  This is more
-        // reliable than the IpPrioritizeRemote phonebook flag for L2TP/IKEv2.
-        // Uses spawnSync with a hard timeout so it can never block indefinitely
-        // if the VPN service is busy or in a bad state.
-        cp.spawnSync('powershell', [
-            'Add-VpnConnectionRoute',
-            `-ConnectionName ${this._name}`,
-            '-DestinationPrefix 0.0.0.0/0'
-        ], { timeout: 10_000 });
-        // Non-fatal: ignore exit code — PPTP/some L2TP servers push their own
-        // default route and the cmdlet may return an error in that case.
+    #applyPostConnectRoute() {
+        this.#log(`POST-ROUTE looking up adapter name="${this._name}"`);
+        const cmd =
+            `$adapter = Get-NetAdapter -Name '${this._name}' -ErrorAction SilentlyContinue;` +
+            ` if ($adapter) { Write-Output "FOUND ifIndex=$($adapter.ifIndex) status=$($adapter.Status)";` +
+            ` New-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0'` +
+            ` -RouteMetric 5 -ErrorAction SilentlyContinue;` +
+            ` Write-Output "ROUTE-ADDED" } else { Write-Output "ADAPTER-NOT-FOUND" }`;
+
+        const r = cp.spawnSync('powershell', ['-Command', cmd], { timeout: 10_000 });
+        const out = r.stdout?.toString().trim() || '';
+        const err = r.stderr?.toString().trim() || '';
+        this.#log(`POST-ROUTE stdout: ${out || '(none)'}`);
+        if (err) this.#log(`POST-ROUTE stderr: ${err}`);
+        this.#log(`POST-ROUTE exit: ${r.status}`);
     }
 
     async #vpnConnect() {
-        // Connect-Vpn (DotRas RasDialer) can hang indefinitely if the IKEv2
-        // handshake stalls or the server stops responding mid-negotiation.
-        // Kill the process after 45 s and let the caller treat it as a failure.
         const TIMEOUT_MS = 45_000;
+        this.#log(`VPN-CONNECT spawning Connect-Vpn for "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
         return new Promise((resolve, reject) => {
             const child = cp.spawn('powershell', [
                 'Connect-Vpn',
@@ -263,15 +289,25 @@ class WindowsVpn extends VpnBase {
             ]);
             let stdout = '';
             let stderr = '';
-            child.stdout.on('data', chunk => { stdout += chunk; });
-            child.stderr.on('data', chunk => { stderr += chunk; });
+            child.stdout.on('data', chunk => {
+                const s = chunk.toString();
+                stdout += s;
+                this.#log(`VPN-CONNECT stdout: ${s.trim()}`);
+            });
+            child.stderr.on('data', chunk => {
+                const s = chunk.toString();
+                stderr += s;
+                this.#log(`VPN-CONNECT stderr: ${s.trim()}`);
+            });
             const timer = setTimeout(() => {
+                this.#log(`VPN-CONNECT timeout after ${TIMEOUT_MS}ms — killing process`);
                 child.kill();
                 reject(new Error('VPN connection timed out after 45 seconds'));
             }, TIMEOUT_MS);
             child.on('close', code => {
                 clearTimeout(timer);
-                this._logStream.write(stdout);
+                this.#log(`VPN-CONNECT process closed — exit code ${code}`);
+                if (stdout.trim()) this._logStream.write(stdout);
                 if (code) reject(new Error(`Subprocess exited with error ${code}:\n${stderr}`));
                 else resolve(stdout);
             });
@@ -284,20 +320,26 @@ class WindowsVpn extends VpnBase {
     }
 
     async #setDns() {
-        // IpPrioritizeRemote = 1 forces all traffic through the VPN gateway
-        // (equivalent to turning off split tunnelling at the phonebook level).
-        // This MUST be written unconditionally — if it is skipped because the
-        // server has no DNS configured, the tunnel comes up but traffic is never
-        // routed through it.
+        this.#log(`SET-DNS reading phonebook from ${phoneBookPath}`);
         let phoneBook = decode(await readFile(phoneBookPath, 'utf-8'));
+
+        const sectionExists = !!phoneBook[this._name];
+        this.#log(`SET-DNS phonebook section "${this._name}" exists=${sectionExists}`);
+
         phoneBook[this._name].IpPrioritizeRemote = '1';
+        this.#log('SET-DNS IpPrioritizeRemote=1 written');
+
         if (this._dns.value) {
             phoneBook[this._name].IpDnsAddress  = this._dns.value[0];
             phoneBook[this._name].IpDns2Address = this._dns.value[1];
             phoneBook[this._name].IpNameAssign  = '2';
+            this.#log(`SET-DNS DNS1=${this._dns.value[0]} DNS2=${this._dns.value[1]} IpNameAssign=2`);
+        } else {
+            this.#log('SET-DNS no DNS values configured — skipping DNS entries');
         }
-        let result = encode(phoneBook);
-        writeFileSync(phoneBookPath, result, 'utf-8');
+
+        writeFileSync(phoneBookPath, encode(phoneBook), 'utf-8');
+        this.#log('SET-DNS phonebook written successfully');
     }
 
     async #logSpawn(cmd, args) {
