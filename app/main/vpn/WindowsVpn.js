@@ -76,6 +76,10 @@ class WindowsVpn extends VpnBase {
         if (this.type === VpnType.L2TP.label) {
             this.#prepareL2tp();
         }
+        // PPTP requires firewall rules for TCP 1723 and GRE (protocol 47).
+        if (this.type === VpnType.PPTP.label) {
+            this.#preparePptp();
+        }
         await this.#addConnection();
         await this.#setDns();
         await this.#vpnConnect();
@@ -161,6 +165,31 @@ class WindowsVpn extends VpnBase {
         cp.spawnSync('sc', ['start', 'PolicyAgent'], { shell: true, timeout: 8000 });
     }
 
+    // ── PPTP pre-flight ───────────────────────────────────────────────────────
+    // PPTP uses TCP 1723 for the control channel AND GRE (IP protocol 47) for
+    // the data channel.  Machines with strict Windows Firewall outbound rules
+    // silently block GRE, so the user sees a connection attempt that hangs and
+    // eventually times out.  We add outbound allow rules for both before dialling.
+    // These are idempotent — deleting before adding means no duplicate rules pile up.
+    #preparePptp() {
+        const rules = [
+            // name                  protocol  remoteport
+            ['VPNUK-PPTP-TCP-1723', 'TCP',    '1723'],
+            ['VPNUK-PPTP-GRE-47',   '47',      null ],   // GRE has no port concept
+        ];
+        for (const [name, proto, port] of rules) {
+            cp.spawnSync('netsh', [
+                'advfirewall', 'firewall', 'delete', 'rule', `name=${name}`
+            ], { shell: true });
+            const add = [
+                'advfirewall', 'firewall', 'add', 'rule',
+                `name=${name}`, 'dir=out', 'action=allow', `protocol=${proto}`,
+            ];
+            if (port) add.push(`remoteport=${port}`);
+            cp.spawnSync('netsh', add, { shell: true });
+        }
+    }
+
     async #addConnection() {
         // IKEv2 MUST use the DNS hostname — never the raw IP address.
         // The certificate's CN/SAN is matched against the hostname; using the
@@ -201,9 +230,16 @@ class WindowsVpn extends VpnBase {
             // Optional encryption avoids handshake failures caused by mismatched
             // cipher negotiation — the IPSec layer already encrypts the tunnel.
             args.push('-EncryptionLevel',      'Optional');
-        } else if (this.type !== VpnType.IKEv2.label) {
-            args.push('-AuthenticationMethod', 'Chap,MsChapv2');
+        } else if (this.type === VpnType.PPTP.label) {
+            // PPTP auth: allow PAP/CHAP/MS-CHAPv2 so the client and server can
+            // negotiate whichever they both support.
+            args.push('-AuthenticationMethod', 'Pap,Chap,MsChapv2');
+            // Windows defaults to Required (MPPE mandatory).  If the server does
+            // not offer MPPE the handshake fails silently.  Optional means the
+            // connection succeeds either way — the GRE tunnel is still used.
+            args.push('-EncryptionLevel',      'Optional');
         }
+        // IKEv2 uses certificate auth — no -AuthenticationMethod needed.
 
         return await this.#logSpawn('powershell', args);
     }
