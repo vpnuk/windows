@@ -80,13 +80,25 @@ class WindowsVpn extends VpnBase {
         if (this.type === VpnType.PPTP.label) {
             this.#preparePptp();
         }
-        await this.#addConnection();
-        // Explicitly register a default route through this connection so all
-        // traffic is sent through the VPN.  More reliable than the phonebook
-        // IpPrioritizeRemote flag alone, especially for L2TP on some systems.
-        await this.#setDefaultRoute();
-        await this.#setDns();
-        await this.#vpnConnect();
+        try {
+            await this.#addConnection();
+            // Set the default route synchronously (spawnSync with timeout) so
+            // it cannot block the flow if the VPN service is unresponsive.
+            this.#setDefaultRoute();
+            await this.#setDns();
+            // 45-second timeout — throws if the handshake stalls.
+            await this.#vpnConnect();
+        } catch (err) {
+            // Any failure in setup or the connect call lands here.
+            // Clean up and surface the error so the UI unblocks.
+            this.#stopDropWatcher();
+            await this.#removeConnection().catch(() => {});
+            this.#connectionStatus = connectionStates.disconnected;
+            this._disconnectedHook?.(true);
+            this._logStream.end();
+            this._errorHook?.(err);
+            return;
+        }
         if (await this.getConnectionStatus() === connectionStates.connected) {
             this.#connectionStatus = connectionStates.connected;
             this._connectedHook?.();
@@ -94,7 +106,7 @@ class WindowsVpn extends VpnBase {
             this.#startDropWatcher();
         }
         else {
-            await this.#removeConnection();
+            await this.#removeConnection().catch(() => {});
             this.#connectionStatus = connectionStates.disconnected;
             // intentional = true — connection never established, treat as expected failure
             this._disconnectedHook?.(true);
@@ -222,18 +234,19 @@ class WindowsVpn extends VpnBase {
         ]);
     }
 
-    async #setDefaultRoute() {
+    #setDefaultRoute() {
         // Store a 0.0.0.0/0 route in the connection profile so Windows adds it
         // to the routing table the moment the tunnel comes up.  This is more
         // reliable than the IpPrioritizeRemote phonebook flag for L2TP/IKEv2.
-        // Non-fatal: PPTP and some L2TP servers push a default route themselves.
-        try {
-            await this.#logSpawn('powershell', [
-                'Add-VpnConnectionRoute',
-                `-ConnectionName ${this._name}`,
-                '-DestinationPrefix 0.0.0.0/0'
-            ]);
-        } catch { /* non-fatal */ }
+        // Uses spawnSync with a hard timeout so it can never block indefinitely
+        // if the VPN service is busy or in a bad state.
+        cp.spawnSync('powershell', [
+            'Add-VpnConnectionRoute',
+            `-ConnectionName ${this._name}`,
+            '-DestinationPrefix 0.0.0.0/0'
+        ], { timeout: 10_000 });
+        // Non-fatal: ignore exit code — PPTP/some L2TP servers push their own
+        // default route and the cmdlet may return an error in that case.
     }
 
     async #vpnConnect() {
