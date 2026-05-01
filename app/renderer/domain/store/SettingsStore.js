@@ -7,6 +7,7 @@ class SettingsStore {
     isModalOpen = false;
     autoConnect = false;
     autoRun = false;
+    autoConnectWaiting = false; /* true while waiting for internet on startup — never persisted */
     update = {
         info: null,
         progress: null
