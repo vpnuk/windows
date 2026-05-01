@@ -6,6 +6,9 @@ const VpnBase = require('./VpnBase');
 
 const isDev = process.env.ELECTRON_ENV === 'Dev';
 
+// How often (ms) to poll the WireGuard tunnel service for an unexpected drop.
+const DROP_POLL_INTERVAL = 5000;
+
 const getWireGuardExePath = () => {
     if (process.env.WG_EXT_PATH && isDev) {
         return process.env.WG_EXT_PATH;
@@ -94,6 +97,7 @@ class WireGuard extends VpnBase {
     #tunnelName;
     #confPath;
     #connectionStatus;
+    #dropWatcher = null;
 
     constructor(profile, hooks) {
         super(profile, hooks);
@@ -101,6 +105,36 @@ class WireGuard extends VpnBase {
         this.#confPath         = settingsPath.wgConf(profile.serverType, profile.server?.dns);
         this.#tunnelName       = path.basename(this.#confPath, '.conf');
         this.#connectionStatus = connectionStates.disconnected;
+    }
+
+    // ── Drop watcher ──────────────────────────────────────────────────────────
+    // Polls the WireGuard tunnel service every DROP_POLL_INTERVAL ms.
+    // If the service stops running while we think we are connected (i.e. not a
+    // user-initiated disconnect) we fire disconnectedHook(false) so the kill
+    // switch stays active and the UI shows the correct state.
+    #startDropWatcher() {
+        const svcName = `WireGuardTunnel$${this.#tunnelName}`;
+        this.#dropWatcher = setInterval(() => {
+            if (this.#connectionStatus !== connectionStates.connected) {
+                this.#stopDropWatcher();
+                return;
+            }
+            const result = cp.spawnSync('sc', ['query', svcName], { shell: true, timeout: 5000 });
+            const out = '' + result.stdout;
+            if (!out.includes('RUNNING')) {
+                this.#stopDropWatcher();
+                this.#connectionStatus = connectionStates.disconnected;
+                // intentional = false — tunnel dropped on its own
+                this._disconnectedHook?.(false);
+            }
+        }, DROP_POLL_INTERVAL);
+    }
+
+    #stopDropWatcher() {
+        if (this.#dropWatcher) {
+            clearInterval(this.#dropWatcher);
+            this.#dropWatcher = null;
+        }
     }
 
     async connect() {
@@ -160,9 +194,12 @@ class WireGuard extends VpnBase {
             this._logStream.write(`[${ts()}] Service start-type set to DEMAND (manual)\n`);
             this.#connectionStatus = connectionStates.connected;
             this._connectedHook?.();
+            // Start watching for unexpected drops.
+            this.#startDropWatcher();
         } else {
             this.#connectionStatus = connectionStates.disconnected;
-            this._disconnectedHook?.();
+            // intentional = true — connection never established, treat as expected failure
+            this._disconnectedHook?.(true);
             this._errorHook?.(new Error(
                 'WireGuard tunnel failed to start. Check the LOG tab for details.'
             ));
@@ -171,12 +208,18 @@ class WireGuard extends VpnBase {
 
     async disconnect() {
         const ts = () => new Date().toISOString();
+
+        // Stop the drop watcher FIRST so it does not fire a false unexpected-drop
+        // event while we are tearing the tunnel down intentionally.
+        this.#stopDropWatcher();
+
         let wgExe;
         try {
             wgExe = getWireGuardExePath();
         } catch {
             this.#connectionStatus = connectionStates.disconnected;
-            this._disconnectedHook?.();
+            // intentional = true
+            this._disconnectedHook?.(true);
             this._logStream.end();
             return;
         }
@@ -200,7 +243,8 @@ class WireGuard extends VpnBase {
         this._logStream.write(`[${ts()}] Uninstall exit: ${code}\n`);
 
         this.#connectionStatus = connectionStates.disconnected;
-        this._disconnectedHook?.();
+        // intentional = true — user initiated this disconnect
+        this._disconnectedHook?.(true);
         this._logStream.end();
     }
 
