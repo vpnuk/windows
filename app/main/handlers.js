@@ -386,6 +386,30 @@ ipcMain.on('ikev2-cert-install', async (event, arg) => {
 const TAWK_URL = 'https://tawk.to/chat/56bae5de496019e65d794d8f/default';
 let liveHelpWindow = null;
 
+let wgManageWindow = null;
+ipcMain.on('open-wg-manage', () => {
+    if (wgManageWindow && !wgManageWindow.isDestroyed()) {
+        wgManageWindow.focus();
+        return;
+    }
+    wgManageWindow = new BrowserWindow({
+        width:  800,
+        height: 600,
+        title:  'WireGuard Config Manager',
+        icon:   path.join(__dirname, '../../app/assets/icon.ico'),
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+        },
+        resizable: true,
+        minimizable: true,
+        maximizable: true,
+    });
+    wgManageWindow.loadURL('https://clientcp.vpnuk.info/vpnuk/clients/wireguard_v2.php');
+    wgManageWindow.setMenuBarVisibility(false);
+    wgManageWindow.on('closed', () => { wgManageWindow = null; });
+});
+
 ipcMain.on('open-live-help', () => {
     if (liveHelpWindow && !liveHelpWindow.isDestroyed()) {
         liveHelpWindow.focus();
