@@ -7,7 +7,7 @@ class RootStore {
         this.settings = persistor(
             new SettingsStore(),
             'settings',
-            ['vpnType', 'profileId']);
+            ['vpnType', 'profileId', 'autoConnect', 'autoRun']);
         this.profiles = persistor(
             new ProfileStore(this.settings),
             'profiles',
