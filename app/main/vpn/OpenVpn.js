@@ -29,13 +29,6 @@ const getOpenVpnExePathSync = (obfuscate = false) => {
     throw new Error('No OpenVPN found.');
 };
 
-// const killWindowsProcess = (pid, callback) => {
-//     let proc = cp.spawn('taskkill', [`/PID\ ${pid}\ /T\ /F`], { shell: true });
-//     proc.on('close', code => {
-//         callback(code);
-//     });
-// };
-
 const killWindowsProcessSync = pid => {
     let code = cp.spawnSync('taskkill', [`/PID\ ${pid}\ /T\ /F`], { shell: true })
         .status;
@@ -60,6 +53,9 @@ const installOvpnUpdate = file =>
 class OpenVpn extends VpnBase {
     #obfuscate; #port; #protocol; #connectionStatus;
     #connection;
+    // Set to true before killing the process so the close handler knows this
+    // was intentional and passes the correct flag to disconnectedHook.
+    #intentionalDisconnect = false;
 
     constructor(profile, hooks) {
         super(profile, hooks);
@@ -71,13 +67,17 @@ class OpenVpn extends VpnBase {
 
     connect() {
         this.#connection = null;
+        this.#intentionalDisconnect = false;
         try {
             this.#connection = this.#runOpenVpn(
                 code => { // on close
                     this._logStream.end();
                     isDev && console.log(`ovpn exited with code ${code}`);
                     this.#connectionStatus = connectionStates.disconnected;
-                    this._disconnectedHook?.();
+                    // Pass whether this was a user-initiated disconnect or an unexpected drop.
+                    // intentional = false means the kill switch stays active.
+                    this._disconnectedHook?.(this.#intentionalDisconnect);
+                    this.#intentionalDisconnect = false;
                 },
                 data => { // on data
                     isDev && console.log(`ovpn-out:\n${data}`);
@@ -100,10 +100,10 @@ class OpenVpn extends VpnBase {
     }
 
     disconnect() {
+        // Mark as intentional BEFORE killing the process so the close handler
+        // sees the flag synchronously when the process exits.
+        this.#intentionalDisconnect = true;
         this.#connection?.pid && killWindowsProcessSync(this.#connection.pid);
-        //  && killWindowsProcess(this.#connection.pid, code => {
-        //     isDev && console.log(`killed process PID=${this.#connection.pid} result=${code}`);
-        // });
     }
 
     getConnectionStatus() {
