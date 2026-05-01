@@ -130,7 +130,7 @@ class WindowsVpn extends VpnBase {
 
     async #removeConnection() {
         return await this.#logSpawn('powershell', [
-            'Remove-VpnConnection', '-Name', this._name, '-Force'
+            'Remove-VpnConnection -Name', this._name, '-Force'
         ]);
     }
 
@@ -192,56 +192,29 @@ class WindowsVpn extends VpnBase {
 
     async #addConnection() {
         // IKEv2 MUST use the DNS hostname — never the raw IP address.
-        // The certificate's CN/SAN is matched against the hostname; using the
-        // IP would fail certificate validation and prevent the handshake.
-        let serverAddress;
-        if (this.type === VpnType.IKEv2.label) {
-            if (!this._server.dns) {
-                throw new Error(
-                    'IKEv2 requires a server hostname but none is set for this server. ' +
-                    'Please contact VPNUK support.'
-                );
-            }
-            serverAddress = this._server.dns;
-        } else {
-            serverAddress = this._server.host;
-        }
+        // The certificate CN/SAN is validated against the hostname; an IP address
+        // fails the TLS handshake.  Fall back to host if no DNS is configured so
+        // the connection is still attempted (it will fail cert validation, but at
+        // least it gets that far rather than erroring out here).
+        const serverAddress = this.type === VpnType.IKEv2.label
+            ? (this._server.dns || this._server.host)
+            : this._server.host;
 
-        // Build the Add-VpnConnection argument list with each parameter and
-        // its value as separate array elements.  Combining them into a single
-        // string (e.g. '-L2tpPsk key') causes PowerShell to treat the whole
-        // thing as one token and silently ignores the value.
-        const args = [
+        // Keep the same argument format as the original working code.
+        // PowerShell's implicit command mode concatenates all argv elements with
+        // spaces into one command string, so multi-word elements like
+        // '-Force -RememberCredential -PassThru' expand correctly.
+        return await this.#logSpawn('powershell', [
             'Add-VpnConnection',
-            '-Name',          this._name,
-            '-TunnelType',    this.type,
+            '-Name', this._name,
+            '-TunnelType', this.type,
             '-ServerAddress', serverAddress,
-            '-Force',
-            '-RememberCredential',
-            '-PassThru',
-        ];
-
-        if (this.type === VpnType.L2TP.label) {
-            // PSK for the IPSec phase — must be a separate named parameter+value.
-            args.push('-L2tpPsk',            this.#ipseckey);
-            // Allow PAP, CHAP, and MS-CHAPv2 for the PPP authentication phase.
-            // Servers typically require at least one of these; PAP is common.
-            args.push('-AuthenticationMethod', 'Pap,Chap,MsChapv2');
-            // Optional encryption avoids handshake failures caused by mismatched
-            // cipher negotiation — the IPSec layer already encrypts the tunnel.
-            args.push('-EncryptionLevel',      'Optional');
-        } else if (this.type === VpnType.PPTP.label) {
-            // PPTP auth: allow PAP/CHAP/MS-CHAPv2 so the client and server can
-            // negotiate whichever they both support.
-            args.push('-AuthenticationMethod', 'Pap,Chap,MsChapv2');
-            // Windows defaults to Required (MPPE mandatory).  If the server does
-            // not offer MPPE the handshake fails silently.  Optional means the
-            // connection succeeds either way — the GRE tunnel is still used.
-            args.push('-EncryptionLevel',      'Optional');
-        }
-        // IKEv2 uses certificate auth — no -AuthenticationMethod needed.
-
-        return await this.#logSpawn('powershell', args);
+            this.type === VpnType.L2TP.label
+                ? `-L2tpPsk ${this.#ipseckey}` : '',
+            this.type !== VpnType.IKEv2.label
+                ? '-AuthenticationMethod Chap, MsChapv2' : '',
+            '-Force -RememberCredential -PassThru'
+        ]);
     }
 
     async #vpnConnect() {
