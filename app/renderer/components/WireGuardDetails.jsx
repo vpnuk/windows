@@ -13,10 +13,9 @@ import { settingsPath }  from '@modules/constants.js';
 
 const fs        = require('fs');
 const path      = require('path');
-const { shell } = require('electron');
+const { ipcRenderer } = require('electron');
 const { getConfEndpointIp } = require('./wgApi');
 
-const MANAGE_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wireguard_v2.php';
 
 const WireGuardDetails = observer(() => {
     const profile    = useStore().profiles.currentProfile;
@@ -66,7 +65,7 @@ const WireGuardDetails = observer(() => {
 
             <div style={{ textAlign: 'center', marginTop: 14 }}>
                 <button
-                    onClick={() => shell.openExternal(MANAGE_URL)}
+                    onClick={() => ipcRenderer.send('open-wg-manage')}
                     style={{
                         background: 'none',
                         border: 'none',
