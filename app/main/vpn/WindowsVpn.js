@@ -211,8 +211,9 @@ class WindowsVpn extends VpnBase {
             '-ServerAddress', serverAddress,
             this.type === VpnType.L2TP.label
                 ? `-L2tpPsk ${this.#ipseckey}` : '',
-            this.type !== VpnType.IKEv2.label
-                ? '-AuthenticationMethod Chap, MsChapv2' : '',
+            this.type === VpnType.IKEv2.label
+                ? '-AuthenticationMethod EapMSChapv2'
+                : '-AuthenticationMethod Chap, MsChapv2',
             '-Force -RememberCredential -PassThru'
         ]);
     }
