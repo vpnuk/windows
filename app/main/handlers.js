@@ -1,6 +1,7 @@
 const { app, dialog, ipcMain, BrowserWindow, shell } = require('electron');
 const path = require('path');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const publicIp = require('public-ip');
 const {
     createVpn,
@@ -16,9 +17,11 @@ const {
     addRouteSync,
     deleteRouteSync,
     getIPv6Adapters,
-    disableIPv6
+    disableIPv6,
+    disableAllIPv6,
+    enableAllIPv6,
 } = require('./utils/routing');
-const { connectionStates, settingsPath } = require('../modules/constants');
+const { connectionStates, settingsPath, settingsFolder, VpnType } = require('../modules/constants');
 const { replaceVersionsEntry } = require('./utils/versions');
 const {
     checkRootCert,
@@ -31,6 +34,17 @@ const { downloadWireGuardInstaller } = require('../modules/catalogs');
 const isDev = process.env.ELECTRON_ENV === 'Dev';
 
 let vpnConnection = null;
+
+// ─── Kill-switch crash-recovery state file ────────────────────────────────────
+// Written to disk whenever the kill switch is active so that if the app is
+// force-killed or crashes we can restore the default route on next startup.
+const ksStatePath = path.join(settingsFolder, 'ks.json');
+
+const writeKsState = (active, gateway = null) => {
+    try {
+        fsSync.writeFileSync(ksStatePath, JSON.stringify({ active, gateway }), 'utf-8');
+    } catch { /* best-effort */ }
+};
 
 // ─── Friendly notification helper ─────────────────────────────────────────────
 const sendNotification = (sender, { type = 'error', title, message }) => {
@@ -85,7 +99,6 @@ ipcMain.on('connection-start', async (event, args) => {
     const { profile, gateway, wVpnOptions } = args;
     const { tray } = require('./main');
     const pid = profile.id || 'default';
-    const ts  = () => new Date().toISOString();
 
     appendToLog(pid, `=== Connection Start ===`);
     appendToLog(pid, `profileName  : ${profile.name || '(unnamed)'}`);
@@ -97,12 +110,45 @@ ipcMain.on('connection-start', async (event, args) => {
     appendToLog(pid, `killSwitch   : ${profile.killSwitchEnabled ? 'ON' : 'off'}`);
     appendToLog(pid, `gateway      : ${gateway || '(unknown)'}`);
 
+    // ── IKEv2: auto-install the root certificate if not already present ────────
+    if (profile.vpnType === VpnType.IKEv2.label) {
+        try {
+            const certPresent = await checkRootCert();
+            if (!certPresent) {
+                appendToLog(pid, `IKEv2: root cert not found — importing...`);
+                await importRootCert(settingsPath.ikev2Cert);
+                appendToLog(pid, `IKEv2: root cert imported OK`);
+            } else {
+                appendToLog(pid, `IKEv2: root cert already in store`);
+            }
+        } catch (err) {
+            appendToLog(pid, `IKEv2: cert import FAILED — ${err.message}`);
+            sendNotification(event.sender, {
+                type: 'error',
+                title: 'IKEv2 Certificate Error',
+                message: `Could not install the IKEv2 certificate: ${err.message}. Try Settings → Connection → Install Certificate first.`
+            });
+            return;
+        }
+    }
+
     vpnConnection = createVpn(profile, {
         connectedHook: async () => {
             appendToLog(pid, `Hook: connected to ${profile.server?.label}`);
             if (profile.killSwitchEnabled) {
-                deleteRouteSync(defaultRoute, gateway).trim();
+                // Remove the ISP default route — all traffic must now flow through
+                // the VPN tunnel. If the tunnel drops unexpectedly the system has no
+                // fallback route so internet is blocked (kill switch is active).
+                deleteRouteSync(defaultRoute, gateway);
                 appendToLog(pid, `Kill-switch: default route removed`);
+
+                // Block IPv6 on every adapter so there is no IPv6 leak path.
+                disableAllIPv6();
+                appendToLog(pid, `Kill-switch: IPv6 disabled on all adapters`);
+
+                // Persist state so startup recovery can restore the route if the
+                // app is force-killed or crashes while the kill switch is active.
+                writeKsState(true, gateway);
             }
             // Mark connected immediately so the UI responds without waiting for the IP lookup.
             event.sender.send('connection-changed', connectionStates.connected);
@@ -119,20 +165,40 @@ ipcMain.on('connection-start', async (event, args) => {
                 event.sender.send('vpn-ip-update', ip);
             }
         },
-        disconnectedHook: () => {
-            appendToLog(pid, `Hook: disconnected`);
+
+        // intentional = true  → user clicked Disconnect (restore internet)
+        // intentional = false → tunnel dropped unexpectedly (keep internet blocked)
+        disconnectedHook: (intentional = true) => {
+            appendToLog(pid, `Hook: disconnected (intentional=${intentional})`);
             try {
                 event.sender.send('connection-changed', connectionStates.disconnected);
             } catch (error) {
                 if (error.message !== 'Object has been destroyed') throw error;
             }
             tray.setDisconnectedState('Disconnected');
+
             if (profile.killSwitchEnabled) {
-                addRouteSync(defaultRoute, gateway, defaultRoute).trim();
-                appendToLog(pid, `Kill-switch: default route restored`);
+                if (intentional) {
+                    // User chose to disconnect — restore full internet access.
+                    addRouteSync(defaultRoute, gateway, defaultRoute);
+                    appendToLog(pid, `Kill-switch: default route restored`);
+                    enableAllIPv6();
+                    appendToLog(pid, `Kill-switch: IPv6 re-enabled on all adapters`);
+                    writeKsState(false);
+                } else {
+                    // Unexpected drop — keep internet blocked and tell the user.
+                    appendToLog(pid, `Kill-switch: tunnel dropped — internet remains blocked`);
+                    sendNotification(event.sender, {
+                        type: 'warning',
+                        title: 'VPN Dropped — Kill Switch Active',
+                        message: 'The VPN dropped unexpectedly. Internet access is blocked to protect your IP. Reconnect or disable the kill switch to restore access.'
+                    });
+                }
             }
-            deleteRouteSync(profile.server.host, gateway).trim();
+
+            deleteRouteSync(profile.server.host, gateway);
         },
+
         connectingHook: () => {
             appendToLog(pid, `Hook: connecting...`);
             event.sender.send('connection-changed', connectionStates.connecting);
