@@ -27,6 +27,35 @@ const { ipcRenderer } = require('electron');
 
 let isDev, store;
 
+/* Auto-connect retry state — cleared on success or cancel */
+let acRetryCount = 0;
+let acRetryTimer = null;
+const AC_MAX_RETRIES  = 3;
+const AC_RETRY_DELAY  = 30_000; /* ms */
+
+function acScheduleRetry() {
+    clearTimeout(acRetryTimer);
+    acRetryTimer = setTimeout(() => {
+        if (!store?.settings?.autoConnectWaiting) return; /* already connected or cancelled */
+        if (acRetryCount >= AC_MAX_RETRIES) {
+            /* Give up — turn off auto-connect so we don't flood on next launch */
+            runInAction(() => {
+                store.settings.autoConnectWaiting = false;
+                store.settings.autoConnect = false;
+            });
+            return;
+        }
+        acRetryCount++;
+        ipcRenderer.send('default-gateway-request');
+    }, AC_RETRY_DELAY);
+}
+
+function acCancelRetry() {
+    clearTimeout(acRetryTimer);
+    acRetryTimer = null;
+    acRetryCount = 0;
+}
+
 // ─── Startup ─────────────────────────────────────────────────────────────────
 
 const App = observer(() => {
@@ -63,6 +92,13 @@ const App = observer(() => {
                         ipcRenderer.send('default-gateway-request');
                     }, 500);
                 }
+
+                // If waiting for internet when the OS reports online, retry gateway check
+                window.addEventListener('online', () => {
+                    if (store?.settings?.autoConnect && store?.settings?.autoConnectWaiting) {
+                        ipcRenderer.send('default-gateway-request');
+                    }
+                }, { once: false });
 
                 // Run OpenVPN update check AFTER initializeCatalogs has written
                 // the current versions.json — avoids false "update available" on first run
@@ -134,6 +170,51 @@ const App = observer(() => {
             >
                 <UpdateInfo />
             </Modal>
+
+            <Modal
+                isOpen={innerStore.settings.autoConnectWaiting}
+                closeTimeoutMS={200}
+                style={{
+                    ...modalStyle,
+                    content: {
+                        ...modalStyle.content,
+                        top: '50%', left: '50%',
+                        right: 'auto', bottom: 'auto',
+                        transform: 'translate(-50%, -50%)',
+                        padding: '28px 32px',
+                        textAlign: 'center',
+                        minWidth: 280,
+                    }
+                }}
+            >
+                <div style={{ color: '#d6e4f7' }}>
+                    <div style={{ fontSize: 28, marginBottom: 12 }}>⏳</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
+                        Auto Connect Enabled
+                    </div>
+                    <div style={{ fontSize: 13, color: '#6b8cad', marginBottom: 24, lineHeight: 1.5 }}>
+                        Waiting for an active internet connection&hellip;
+                        <br />
+                        <span style={{ fontSize: 11, color: '#3d5a7a' }}>
+                            Will retry up to {AC_MAX_RETRIES} times every {AC_RETRY_DELAY / 1000}s
+                        </span>
+                    </div>
+                    <button
+                        onClick={() => { acCancelRetry(); runInAction(() => { store.settings.autoConnectWaiting = false; store.settings.autoConnect = false; }); }}
+                        style={{
+                            background: 'transparent',
+                            border: '1px solid #1e2d4a',
+                            borderRadius: 45,
+                            color: '#6b8cad',
+                            padding: '6px 24px',
+                            fontSize: 13,
+                            cursor: 'pointer',
+                        }}
+                    >
+                        Cancel
+                    </button>
+                </div>
+            </Modal>
         </div>
     );
 });
@@ -158,22 +239,37 @@ ipcRenderer.on('default-gateway-response', (_, arg) => {
     runInAction(() => {
         ConnectionStore.gateway = arg;
     });
-    // Auto-connect if enabled and we just got gateway
+
     if (store?.settings?.autoConnect && ConnectionStore.state === 'Disconnected') {
-        const profile = store.profiles.currentProfile;
-        if (profile?.server?.host) {
-            ipcRenderer.send('connection-start', {
-                profile,
-                gateway: arg,
-                wVpnOptions: { ipseckey: WvpnOptions.ipseckey }
-            });
+        if (arg) {
+            // Internet is up — connect and clear any waiting/retry state
+            acCancelRetry();
+            runInAction(() => { store.settings.autoConnectWaiting = false; });
+            const profile = store.profiles.currentProfile;
+            if (profile?.server?.host) {
+                ipcRenderer.send('connection-start', {
+                    profile,
+                    gateway: arg,
+                    wVpnOptions: { ipseckey: WvpnOptions.ipseckey }
+                });
+            }
+        } else {
+            // No gateway yet — show the waiting modal and schedule a retry
+            runInAction(() => { store.settings.autoConnectWaiting = true; });
+            acScheduleRetry();
         }
     }
 });
 
 ipcRenderer.on('connection-changed', (_, arg) => {
     isDev && console.log('connection-changed', arg);
-    runInAction(() => { ConnectionStore.state = arg; });
+    runInAction(() => {
+        ConnectionStore.state = arg;
+        if (arg !== 'Disconnected' && store?.settings?.autoConnectWaiting) {
+            acCancelRetry();
+            store.settings.autoConnectWaiting = false;
+        }
+    });
 });
 
 ipcRenderer.on('ovpn-update-response', async (event, arg) => {
