@@ -40,6 +40,30 @@ exports.disableIPv6 = async adapterName =>
         [
             'Start-Process', '-FilePath', 'powershell', '-ArgumentList',
             `@('Disable-NetAdapterBinding', '-Name', '''${adapterName}''', '-ComponentID', 'ms_tcpip6')`,
-            '-Verb', 'RunAs', '-WindowStyle', 'Hidden' //'-NoNewWindow'
+            '-Verb', 'RunAs', '-WindowStyle', 'Hidden'
         ],
         { shell: true });
+
+// Disable IPv6 on every adapter — used by the kill switch to prevent IPv6 leaks.
+// Runs synchronously since it is called from inside connect/disconnect hooks.
+exports.disableAllIPv6 = () =>
+    cp.spawnSync(
+        'powershell',
+        [
+            '-Command',
+            'Get-NetAdapterBinding -ComponentID ms_tcpip6 | Where-Object { $_.Enabled } | ForEach-Object { Disable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 -Confirm:$false }'
+        ],
+        { shell: false }
+    );
+
+// Re-enable IPv6 on every adapter — called when kill switch is released
+// (intentional disconnect or crash recovery on next startup).
+exports.enableAllIPv6 = () =>
+    cp.spawnSync(
+        'powershell',
+        [
+            '-Command',
+            'Get-NetAdapterBinding -ComponentID ms_tcpip6 | Where-Object { !$_.Enabled } | ForEach-Object { Enable-NetAdapterBinding -Name $_.Name -ComponentID ms_tcpip6 -Confirm:$false }'
+        ],
+        { shell: false }
+    );
