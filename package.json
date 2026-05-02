@@ -62,6 +62,7 @@
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
       "installerHeader": "nsis/installerHeader.bmp",
+      "installerSidebar": "nsis/installerSidebar.bmp",
       "runAfterFinish": true,
       "include": "nsis/extension.nsh"
     },
