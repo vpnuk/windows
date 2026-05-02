@@ -99,6 +99,10 @@ class WindowsVpn extends VpnBase {
             this.#log('Running PPTP pre-flight (firewall rules TCP-1723 + GRE-47)');
             this.#preparePptp();
         }
+        if (this.type === VpnType.IKEv2.label) {
+            this.#log('Running IKEv2 pre-flight (DisableStrictCertificateChecking)');
+            this.#prepareIkev2();
+        }
 
         try {
             this.#log('STEP 1 — Add-VpnConnection (creating profile)');
@@ -232,6 +236,24 @@ class WindowsVpn extends VpnBase {
         }
     }
 
+    // ── IKEv2 pre-flight ──────────────────────────────────────────────────────
+    #prepareIkev2() {
+        // Windows IKEv2 enforces strict server-certificate EKU checks by default:
+        // the server cert must carry the serverAuth OID (1.3.6.1.5.5.7.3.1).
+        // VPNUK's internal CA issues certs without that OID, which causes Windows
+        // to abort the IKE_AUTH exchange with "Invalid payload received" (13868).
+        // DisableStrictCertificateChecking=1 relaxes the EKU requirement so the
+        // connection can proceed while still verifying the cert chain (the VPNUK
+        // Root CA is in LocalMachine\Root).
+        const r = cp.spawnSync('reg', [
+            'add',
+            'HKLM\\SYSTEM\\CurrentControlSet\\Services\\RasMan\\Parameters',
+            '/v', 'DisableStrictCertificateChecking',
+            '/t', 'REG_DWORD', '/d', '1', '/f'
+        ], { shell: true, timeout: 5000 });
+        this.#log(`IKEv2-PREP DisableStrictCertificateChecking=1 → exit ${r.status} ${r.stderr?.toString().trim() || ''}`);
+    }
+
     async #addConnection() {
         const serverAddress = this.type === VpnType.IKEv2.label
             ? (this._server.dns || this._server.host)
@@ -331,10 +353,17 @@ class WindowsVpn extends VpnBase {
             `   | Select-Object -First 1;` +
             ` if ($ppp) {` +
             `   Write-Output "FOUND-BY-PPP ifIndex=$($ppp.InterfaceIndex) alias=$($ppp.InterfaceAlias) addr=$($ppp.IPAddress)";` +
-            // Force the PPP interface to metric 1 so its total (InterfaceMetric+RouteMetric)
-            // is lower than any existing WiFi/Ethernet default route.
+            // Force interface metric to 1 so its total beats all physical adapters.
             `   Set-NetIPInterface -InterfaceIndex $ppp.InterfaceIndex -InterfaceMetric 1 -ErrorAction SilentlyContinue;` +
+            // Remove any existing default route on this interface (added by Windows PPP
+            // stack or a prior attempt) so we don't fight with a high-metric duplicate.
+            `   Remove-NetRoute -InterfaceIndex $ppp.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue;` +
             `   New-NetRoute -InterfaceIndex $ppp.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -RouteMetric 1 -ErrorAction SilentlyContinue;` +
+            // Flush the IPv4 routing cache so Windows uses the new route immediately.
+            `   netsh interface ipv4 delete destinationcache | Out-Null;` +
+            // Dump all default routes so we can verify ours wins.
+            `   $routes = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | ForEach-Object { "if=$($_.InterfaceIndex) total=$(([int]$_.InterfaceMetric)+([int]$_.RouteMetric)) next=$($_.NextHop)" };` +
+            `   Write-Output "DEFAULT-ROUTES: $($routes -join ' | ')";` +
             `   Write-Output "ROUTE-ADDED"; return` +
             ` };` +
             ` Write-Output "ADAPTER-NOT-FOUND"`;
@@ -350,29 +379,13 @@ class WindowsVpn extends VpnBase {
     async #vpnConnect() {
         const TIMEOUT_MS = 45_000;
 
-        // IKEv2 with EAP: DotRas's Connect-Vpn passes credentials via RasDialParams
-        // in a way that the Windows EAP stack rejects (both PEAP and raw MSCHAPv2
-        // result in "Invalid payload received").  rasdial.exe uses the Win32 RasDial
-        // API which routes credentials through the EAP credential provider correctly.
-        const useRasdial = this.type === VpnType.IKEv2.label;
-
-        let child;
-        if (useRasdial) {
-            this.#log(`VPN-CONNECT using rasdial for IKEv2 "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
-            child = cp.spawn('rasdial', [
-                this._name,
-                this._credentials.login,
-                this._credentials.password,
-            ]);
-        } else {
-            this.#log(`VPN-CONNECT using Connect-Vpn for ${this.type} "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
-            child = cp.spawn('powershell', [
-                'Connect-Vpn',
-                this._name,
-                this._credentials.login,
-                this._credentials.password,
-            ]);
-        }
+        this.#log(`VPN-CONNECT using Connect-Vpn for ${this.type} "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
+        const child = cp.spawn('powershell', [
+            'Connect-Vpn',
+            this._name,
+            this._credentials.login,
+            this._credentials.password,
+        ]);
 
         return new Promise((resolve, reject) => {
             let stdout = '';
