@@ -73,7 +73,12 @@ const showMessageBoxOnError = (error, title = 'Error', sender = null) => {
 const closeConnection = async (beforeDisconnectCb = () => { }) => {
     let status = await vpnConnection?.getConnectionStatus();
     isDev && console.log(`closeConnection. status=${status}`);
-    if (!vpnConnection || status !== connectionStates.connected) {
+    // Disconnect if connected OR still connecting — the tunnel service is already
+    // installed in both states and must be torn down, otherwise it stays running
+    // as an orphan in Network Adapters after the app exits.
+    const needsDisconnect = status === connectionStates.connected ||
+                            status === connectionStates.connecting;
+    if (!vpnConnection || !needsDisconnect) {
         return true;
     }
     if (dialog.showMessageBoxSync({
@@ -432,6 +437,3 @@ ipcMain.on('open-live-help', () => {
     liveHelpWindow.setMenuBarVisibility(false);
     liveHelpWindow.on('closed', () => { liveHelpWindow = null; });
 });
-
-
-ipcMain.handle('get-version', () => app.getVersion());
