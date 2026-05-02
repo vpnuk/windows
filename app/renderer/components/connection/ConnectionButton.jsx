@@ -1,15 +1,11 @@
 import { ipcRenderer } from 'electron';
 import React, { useRef } from 'react';
-import { toJS, runInAction }       from 'mobx';
 import { observer }                from 'mobx-react-lite';
-import { connectionStates, VpnType } from '@modules/constants.js';
-import { ConnectionStore, ConnectionLogStore, useStore, WvpnOptions } from '@domain';
-
-const { ensureWgConfig } = require('../wgApi');
+import { connectionStates }        from '@modules/constants.js';
+import { ConnectionStore, ConnectionLogStore, useStore } from '@domain';
+import { useConnectAction }        from './useConnectAction';
 
 // ── Step-log panel styles ──────────────────────────────────────────────────────
-// Fixed height shared by both the log and error panel — must never change so
-// the layout doesn't shift as lines are added or scrollbars appear.
 const PANEL_HEIGHT = 100;
 
 const S = {
@@ -53,19 +49,17 @@ const S = {
 };
 
 const ConnectionButton = observer(() => {
-    const profile = useStore().profiles.currentProfile;
-
-    const [busy, setBusy] = React.useState(false);
+    const profile  = useStore().profiles.currentProfile;
+    const { startConnect, busy } = useConnectAction(profile);
     const logEndRef = useRef(null);
 
     const stepLog  = ConnectionLogStore.steps;
     const errorMsg = ConnectionLogStore.error;
 
-    const pushStep = (msg) => {
-        if (!msg) return;
-        ConnectionLogStore.pushStep(msg);
-        requestAnimationFrame(() => logEndRef.current?.scrollIntoView({ behavior: 'smooth' }));
-    };
+    // Auto-scroll to latest step
+    React.useEffect(() => {
+        logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [stepLog.length]);
 
     const handleClick = async () => {
         if (ConnectionStore.state !== connectionStates.disconnected) {
@@ -73,90 +67,7 @@ const ConnectionButton = observer(() => {
             ConnectionLogStore.clear();
             return;
         }
-
-        ConnectionLogStore.clear();
-
-        const details = profile.details || {};
-        const mtuVal  = details.mtu?.value;
-        const dnsVal  = details.dns?.value;
-        const hasMtu  = !!mtuVal;
-        const hasDns  = !!(dnsVal && dnsVal.length);
-        const vpnType = profile.vpnType;
-
-        pushStep('Connection initialised\u2026');
-
-        // ── WireGuard ─────────────────────────────────────────────────────────
-        if (vpnType === VpnType.WireGuard.label) {
-            setBusy(true);
-
-            let result;
-            try {
-                result = await ensureWgConfig(toJS(profile), msg => {
-                    if (msg) pushStep(msg);
-                });
-            } catch (err) {
-                result = { success: false, error: err.message || 'WireGuard setup failed.' };
-            }
-
-            setBusy(false);
-
-            if (!result.success) {
-                ConnectionLogStore.setError(result.error || 'Could not prepare WireGuard config.');
-                return;
-            }
-
-            // Config is on disk — tell ConfigEditor to re-read it.
-            runInAction(() => { profile.wgConfigFetched = !profile.wgConfigFetched; });
-
-            pushStep('Handing off to WireGuard service\u2026');
-        }
-
-        // ── OpenVPN ───────────────────────────────────────────────────────────
-        else if (vpnType === VpnType.OpenVPN.label) {
-            if (hasMtu) pushStep(`Applying custom MTU (mss-fix ${mtuVal}) \u2713`);
-            if (hasDns) pushStep(`Applying custom DNS (${dnsVal.join(', ')}) \u2713`);
-
-            const protocol = details.protocol || 'TCP';
-            const port     = details.port     || '443';
-            const isObfs   = protocol === 'Obfuscation';
-            pushStep(`Connecting over ${isObfs ? 'UDP (obfuscated)' : protocol} port ${port}\u2026`);
-            pushStep('Handing off to OpenVPN service\u2026');
-        }
-
-        // ── Windows native VPN — IKEv2, L2TP, PPTP ───────────────────────────
-        else {
-            if (hasMtu) pushStep(`Applying custom MTU settings \u2713`);
-            if (hasDns) pushStep(`Applying custom DNS (${dnsVal.join(', ')}) \u2713`);
-            pushStep('Handing off to native VPN service\u2026');
-        }
-
-        ipcRenderer.send('connection-start', {
-            profile:     toJS(profile),
-            gateway:     toJS(ConnectionStore.gateway),
-            wVpnOptions: toJS(WvpnOptions),
-        });
-
-        // Poll until we reach a definitive connected or failed state.
-        // We must NOT fire on 'connecting' — only on the real 'connected' state.
-        let seenConnecting = false;
-        let ticks = 0;
-        const maxTicks = 400; // ~120 s safety cap
-        const clear = setInterval(() => {
-            ticks++;
-            const st = ConnectionStore.state;
-            if (st === connectionStates.connecting) {
-                seenConnecting = true;
-            } else if (st === connectionStates.connected) {
-                pushStep(`Connected to ${profile.server?.label || 'server'} \u2713`);
-                clearInterval(clear);
-            } else if (st === connectionStates.disconnected && seenConnecting) {
-                // Went back to disconnected without reaching connected — auth or tunnel failure.
-                ConnectionLogStore.setError('Connection failed. Please check your username and password, then try again.');
-                clearInterval(clear);
-            } else if (ticks >= maxTicks) {
-                clearInterval(clear);
-            }
-        }, 300);
+        await startConnect();
     };
 
     const isConnected = ConnectionStore.state !== connectionStates.disconnected;
@@ -191,7 +102,6 @@ const ConnectionButton = observer(() => {
                     fontSize: 11,
                     color: '#2ecc71',
                 }}>
-                    {/* Lifebuoy SVG */}
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
                          stroke="#2ecc71" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                          style={{ flexShrink: 0 }}>

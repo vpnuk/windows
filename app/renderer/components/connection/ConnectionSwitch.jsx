@@ -1,16 +1,26 @@
 import { ipcRenderer } from 'electron';
 import React from 'react';
-import { toJS } from 'mobx';
 import { observer } from 'mobx-react-lite';
 import { Switch } from 'antd';
 import { CSSTransition } from 'react-transition-group';
 import '@components/index.css';
 import { connectionStates } from '@modules/constants.js';
-import { ConnectionStore, ConnectionLogStore, useStore, WvpnOptions } from '@domain';
+import { ConnectionStore, ConnectionLogStore, useStore } from '@domain';
+import { useConnectAction } from './useConnectAction';
 
 const ConnectionSwitch = observer(() => {
     const profile = useStore().profiles.currentProfile;
-    
+    const { startConnect, busy } = useConnectAction(profile);
+
+    const handleChange = async (checked) => {
+        if (checked && ConnectionStore.state === connectionStates.disconnected) {
+            await startConnect();
+        } else {
+            ConnectionLogStore.clear();
+            ipcRenderer.send('connection-stop');
+        }
+    };
+
     return <>
         <div className="column-content_block-check">
             <CSSTransition
@@ -20,20 +30,9 @@ const ConnectionSwitch = observer(() => {
             >
                 <Switch
                     className="switch"
-                    onChange={checked => {
-                        ConnectionLogStore.clear();
-                        if (checked && ConnectionStore.state === connectionStates.disconnected) {
-                            ipcRenderer.send('connection-start', {
-                                profile: toJS(profile),
-                                gateway: toJS(ConnectionStore.gateway),
-                                wVpnOptions: toJS(WvpnOptions)
-                            });
-                        }
-                        else {
-                            ipcRenderer.send('connection-stop');
-                        }
-                    }}
+                    onChange={handleChange}
                     checked={ConnectionStore.state !== connectionStates.disconnected}
+                    disabled={busy}
                 />
             </CSSTransition>
             <p>{ConnectionStore.state}</p>
