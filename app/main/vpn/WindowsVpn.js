@@ -331,7 +331,10 @@ class WindowsVpn extends VpnBase {
             `   | Select-Object -First 1;` +
             ` if ($ppp) {` +
             `   Write-Output "FOUND-BY-PPP ifIndex=$($ppp.InterfaceIndex) alias=$($ppp.InterfaceAlias) addr=$($ppp.IPAddress)";` +
-            `   New-NetRoute -InterfaceIndex $ppp.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -RouteMetric 5 -ErrorAction SilentlyContinue;` +
+            // Force the PPP interface to metric 1 so its total (InterfaceMetric+RouteMetric)
+            // is lower than any existing WiFi/Ethernet default route.
+            `   Set-NetIPInterface -InterfaceIndex $ppp.InterfaceIndex -InterfaceMetric 1 -ErrorAction SilentlyContinue;` +
+            `   New-NetRoute -InterfaceIndex $ppp.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -RouteMetric 1 -ErrorAction SilentlyContinue;` +
             `   Write-Output "ROUTE-ADDED"; return` +
             ` };` +
             ` Write-Output "ADAPTER-NOT-FOUND"`;
@@ -346,14 +349,32 @@ class WindowsVpn extends VpnBase {
 
     async #vpnConnect() {
         const TIMEOUT_MS = 45_000;
-        this.#log(`VPN-CONNECT spawning Connect-Vpn for "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
-        return new Promise((resolve, reject) => {
-            const child = cp.spawn('powershell', [
+
+        // IKEv2 with EAP: DotRas's Connect-Vpn passes credentials via RasDialParams
+        // in a way that the Windows EAP stack rejects (both PEAP and raw MSCHAPv2
+        // result in "Invalid payload received").  rasdial.exe uses the Win32 RasDial
+        // API which routes credentials through the EAP credential provider correctly.
+        const useRasdial = this.type === VpnType.IKEv2.label;
+
+        let child;
+        if (useRasdial) {
+            this.#log(`VPN-CONNECT using rasdial for IKEv2 "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
+            child = cp.spawn('rasdial', [
+                this._name,
+                this._credentials.login,
+                this._credentials.password,
+            ]);
+        } else {
+            this.#log(`VPN-CONNECT using Connect-Vpn for ${this.type} "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
+            child = cp.spawn('powershell', [
                 'Connect-Vpn',
                 this._name,
                 this._credentials.login,
                 this._credentials.password,
             ]);
+        }
+
+        return new Promise((resolve, reject) => {
             let stdout = '';
             let stderr = '';
             child.stdout.on('data', chunk => {
