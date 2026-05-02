@@ -28,11 +28,9 @@
     "dotnet-build": "dotnet build VpnHelper\\VpnHelper.csproj -c Release -o .\\VpnHelper\\bin\\VpnHelper",
     "build-react-nsis": "yarn run react-build && yarn run nsis-plugin-copy",
     "build": "yarn run build-react-nsis && yarn run dotnet-build && dotenv cross-var yarn run electron-builder",
-    
     "react-start": "react-app-rewired start",
     "electron-start": "electron .",
     "start": "concurrently --kill-others \"dotenv cross-var yarn run react-start\" \"wait-on http://localhost:3000 && yarn run dotenv cross-var electron .\"",
-    
     "react-test": "react-app-rewired test",
     "react-eject": "react-app-rewired eject",
     "pspath-import": "powershell [Environment]::SetEnvironmentVariable(\"PSModulePath\", [Environment]::GetEnvironmentVariable(\"PSModulePath\", \"Machine\") + [System.IO.Path]::PathSeparator + \"C:\\Users\\kryuc\\git\\vpnuk-windows\\VpnHelper\\bin\\\", \"Machine\")"
@@ -64,7 +62,6 @@
       "allowElevation": true,
       "allowToChangeInstallationDirectory": true,
       "installerHeader": "nsis/installerHeader.bmp",
-      "installerSidebar": "nsis/installerSidebar.bmp",
       "runAfterFinish": true,
       "include": "nsis/extension.nsh"
     },
@@ -89,7 +86,9 @@
       {
         "from": "VpnHelper/bin/VpnHelper",
         "to": "PSModules/VpnHelper",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "extends": null
