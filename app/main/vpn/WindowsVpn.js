@@ -287,6 +287,8 @@ class WindowsVpn extends VpnBase {
         if (this.type === VpnType.IKEv2.label) {
             this.#log('IKEv2 — overriding EAP config to raw MSCHAPv2 (type 26)');
             await this.#setIkev2EapConfig();
+            this.#log('IKEv2 — setting explicit IPsec cipher suite (AES-256/SHA-256/DH-14)');
+            await this.#setIkev2IpsecConfig();
         }
 
         return result;
@@ -331,42 +333,84 @@ class WindowsVpn extends VpnBase {
         }
     }
 
+    async #setIkev2IpsecConfig() {
+        // Explicitly configure the IKEv2 IPsec cipher suite to match what
+        // VPNUK's strongSwan-based servers accept.  By default Windows proposes
+        // every suite it supports; if the server only accepts a specific subset
+        // it replies with an "Invalid payload received" error (13868).
+        // AES-256 / SHA-256 / DH group-14 is the most widely supported config.
+        const cmd =
+            `Set-VpnConnectionIPsecConfiguration` +
+            ` -ConnectionName '${this._name}'` +
+            ` -AuthenticationTransformConstants SHA256128` +
+            ` -CipherTransformConstants AES256` +
+            ` -DHGroup Group14` +
+            ` -EncryptionMethod AES256` +
+            ` -IntegrityCheckMethod SHA256` +
+            ` -PfsGroup None` +
+            ` -Force`;
+        try {
+            const result = await this.#logSpawn('powershell', ['-Command', cmd]);
+            this.#log(`IKEv2-IPSEC result: ${result?.trim() || '(none)'}`);
+        } catch (err) {
+            this.#log(`IKEv2-IPSEC config error (non-fatal): ${err.message}`);
+        }
+    }
+
     #applyPostConnectRoute() {
         this.#log(`POST-ROUTE looking up adapter name="${this._name}"`);
-        // Strategy 1 — exact name match (works for IKEv2, may not for L2TP PPP adapters).
-        // Strategy 2 — /32 point-to-point address fallback: every PPP tunnel (L2TP, PPTP)
-        //              gets a /32 remote address; nothing else on a normal Windows machine does.
+        // ─── IMPORTANT — L2TP/IPSec routing safety ────────────────────────────
+        // L2TP uses IPSec to encrypt the tunnel.  The IPSec Security Association
+        // (SA) is maintained over the PHYSICAL interface (WiFi) directly to the
+        // VPN server IP.  If we change the PPP adapter's interface metric or flush
+        // the destination cache, Windows can route IPSec SA traffic through the
+        // PPP tunnel itself — a routing loop that:
+        //   • breaks the IPSec SA (no more tunnel)
+        //   • drops all traffic (appears as "no internet")
+        //   • causes the WiFi icon to show "no connection" (NCSI probe fails)
+        // This does NOT affect PPTP because PPTP has no IPSec layer.
+        //
+        // Safe strategy:
+        //   1. Add a /32 host route for the VPN server via the current physical
+        //      gateway FIRST — this pins IPSec SA traffic to WiFi regardless of
+        //      what happens to the default route.
+        //   2. Add a low-metric 0.0.0.0/0 default route on the PPP adapter.
+        //   Do NOT touch interface metrics or flush the destination cache.
+        const serverHost = this._server.host;
         const cmd =
-            // Diagnostic: list all adapters so we can see what Windows actually calls them.
             `$all = (Get-NetAdapter | ForEach-Object { "$($_.Name)=[$($_.Status)]" }) -join ', ';` +
             ` Write-Output "ALL-ADAPTERS: $all";` +
-            // Strategy 1: exact name.
+            // Find the PPP adapter — exact name first, /32 fallback.
             ` $adapter = Get-NetAdapter -Name '${this._name}' -ErrorAction SilentlyContinue;` +
             ` if ($adapter) {` +
             `   Write-Output "FOUND-BY-NAME ifIndex=$($adapter.ifIndex) status=$($adapter.Status)";` +
-            `   New-NetRoute -InterfaceIndex $adapter.ifIndex -DestinationPrefix '0.0.0.0/0' -RouteMetric 5 -ErrorAction SilentlyContinue;` +
-            `   Write-Output "ROUTE-ADDED"; return` +
+            `   $pppIdx = $adapter.ifIndex` +
+            ` } else {` +
+            `   $ppp = Get-NetIPAddress -AddressFamily IPv4 -PrefixLength 32 -ErrorAction SilentlyContinue` +
+            `     | Where-Object { $_.InterfaceAlias -notlike 'Loopback*' }` +
+            `     | Select-Object -First 1;` +
+            `   if ($ppp) {` +
+            `     Write-Output "FOUND-BY-PPP ifIndex=$($ppp.InterfaceIndex) alias=$($ppp.InterfaceAlias) addr=$($ppp.IPAddress)";` +
+            `     $pppIdx = $ppp.InterfaceIndex` +
+            `   } else {` +
+            `     Write-Output "ADAPTER-NOT-FOUND"; return` +
+            `   }` +
             ` };` +
-            // Strategy 2: /32 PPP point-to-point address.
-            ` $ppp = Get-NetIPAddress -AddressFamily IPv4 -PrefixLength 32 -ErrorAction SilentlyContinue` +
-            `   | Where-Object { $_.InterfaceAlias -notlike 'Loopback*' }` +
+            // Step 1: pin VPN server to physical interface so the IPSec SA survives.
+            ` $physRoute = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue` +
+            `   | Where-Object { $_.InterfaceIndex -ne $pppIdx }` +
+            `   | Sort-Object { [int]$_.InterfaceMetric + [int]$_.RouteMetric }` +
             `   | Select-Object -First 1;` +
-            ` if ($ppp) {` +
-            `   Write-Output "FOUND-BY-PPP ifIndex=$($ppp.InterfaceIndex) alias=$($ppp.InterfaceAlias) addr=$($ppp.IPAddress)";` +
-            // Force interface metric to 1 so its total beats all physical adapters.
-            `   Set-NetIPInterface -InterfaceIndex $ppp.InterfaceIndex -InterfaceMetric 1 -ErrorAction SilentlyContinue;` +
-            // Remove any existing default route on this interface (added by Windows PPP
-            // stack or a prior attempt) so we don't fight with a high-metric duplicate.
-            `   Remove-NetRoute -InterfaceIndex $ppp.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue;` +
-            `   New-NetRoute -InterfaceIndex $ppp.InterfaceIndex -DestinationPrefix '0.0.0.0/0' -RouteMetric 1 -ErrorAction SilentlyContinue;` +
-            // Flush the IPv4 routing cache so Windows uses the new route immediately.
-            `   netsh interface ipv4 delete destinationcache | Out-Null;` +
-            // Dump all default routes so we can verify ours wins.
-            `   $routes = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | ForEach-Object { "if=$($_.InterfaceIndex) total=$(([int]$_.InterfaceMetric)+([int]$_.RouteMetric)) next=$($_.NextHop)" };` +
-            `   Write-Output "DEFAULT-ROUTES: $($routes -join ' | ')";` +
-            `   Write-Output "ROUTE-ADDED"; return` +
+            ` if ($physRoute) {` +
+            `   New-NetRoute -InterfaceIndex $physRoute.InterfaceIndex -DestinationPrefix '${serverHost}/32' -NextHop $physRoute.NextHop -RouteMetric 1 -ErrorAction SilentlyContinue;` +
+            `   Write-Output "VPN-SERVER-PROTECTED: server=${serverHost} via if=$($physRoute.InterfaceIndex) gw=$($physRoute.NextHop)"` +
             ` };` +
-            ` Write-Output "ADAPTER-NOT-FOUND"`;
+            // Step 2: add the default route via PPP (low metric beats WiFi).
+            ` New-NetRoute -InterfaceIndex $pppIdx -DestinationPrefix '0.0.0.0/0' -RouteMetric 1 -ErrorAction SilentlyContinue;` +
+            // Diagnostic dump.
+            ` $routes = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' | ForEach-Object { "if=$($_.InterfaceIndex) total=$(([int]$_.InterfaceMetric)+([int]$_.RouteMetric)) next=$($_.NextHop)" };` +
+            ` Write-Output "DEFAULT-ROUTES: $($routes -join ' | ')";` +
+            ` Write-Output "ROUTE-ADDED"`;
 
         const r = cp.spawnSync('powershell', ['-Command', cmd], { timeout: 10_000 });
         const out = r.stdout?.toString().trim() || '';
