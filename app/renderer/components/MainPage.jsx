@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { observer } from 'mobx-react-lite';
 import ShieldImage from '@assets/shield.png';
 import '@components/index.css';
@@ -64,6 +64,13 @@ const MainPage = observer(({ showDrawer }) => {
     const profile = store.profiles.currentProfile;
     const steps   = ConnectionLogStore.steps;
     const errMsg  = ConnectionLogStore.error;
+    const [appVersion, setAppVersion] = useState('');
+    useEffect(() => {
+        try {
+            const { ipcRenderer } = require('electron');
+            ipcRenderer.invoke('get-version').then(v => setAppVersion(v)).catch(() => {});
+        } catch { /* non-Electron env */ }
+    }, []);
 
     return <>
         <div className="wrapper-content">
@@ -139,6 +146,22 @@ const MainPage = observer(({ showDrawer }) => {
             </div>
             <div className="column"></div>
         </div>
+        {appVersion && (
+            <div style={{
+                position: 'fixed',
+                bottom: 8,
+                width: '100%',
+                textAlign: 'center',
+                fontSize: 11,
+                color: '#90b8f8',
+                opacity: 0.6,
+                userSelect: 'none',
+                pointerEvents: 'none',
+                letterSpacing: '0.04em',
+            }}>
+                v{appVersion}
+            </div>
+        )}
     </>;
 });
 
