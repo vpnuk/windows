@@ -432,3 +432,6 @@ ipcMain.on('open-live-help', () => {
     liveHelpWindow.setMenuBarVisibility(false);
     liveHelpWindow.on('closed', () => { liveHelpWindow = null; });
 });
+
+
+ipcMain.handle('get-version', () => app.getVersion());
