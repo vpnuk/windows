@@ -233,6 +233,8 @@ ipcMain.on('is-dev-request', event => {
     event.sender.send('is-dev-response', isDev);
 });
 
+ipcMain.handle('get-version', () => app.getVersion());
+
 // Allow the renderer process (wgApi, ConnectionButton) to append diagnostic
 // lines into the same log file that WireGuard / OpenVPN write to.
 ipcMain.on('log-append', (_, { profileId, line }) => {
