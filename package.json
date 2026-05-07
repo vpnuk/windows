@@ -98,7 +98,8 @@
         ]
       }
     ],
-    "extends": null
+    "extends": null,
+    "afterPack": "./afterPack.js"
   },
   "dependencies": {
     "adm-zip": "^0.5.5",
