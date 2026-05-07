@@ -69,7 +69,7 @@
       "allowToChangeInstallationDirectory": true,
       "installerHeader": "nsis/installerHeader.bmp",
       "installerSidebar": "nsis/installerSidebar.bmp",
-      "runAfterFinish": false,
+      "runAfterFinish": true,
       "include": "nsis/extension.nsh"
     },
     "directories": {
