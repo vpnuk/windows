@@ -65,10 +65,6 @@ jobs:
         run: yarn run electron-builder --win --publish=never
 
       # ── EV Code Signing via ssl.com eSigner ──────────────────────────────────
-      # Signs both the full installer and the web installer exe.
-      # The .nsis.7z content packages are not executables and do not need signing.
-      # Required secrets: ESIGNER_USERNAME, ESIGNER_PASSWORD,
-      #                   ESIGNER_CREDENTIAL_ID, ESIGNER_TOTP_SECRET
       - name: Download CodeSignTool
         shell: pwsh
         run: |
@@ -91,7 +87,6 @@ jobs:
           ESIGNER_TOTP_SECRET:   ${{ secrets.ESIGNER_TOTP_SECRET }}
           CODE_SIGN_TOOL_PATH:   ${{ env.CST_DIR }}
         run: |
-          # Sign full installer and web installer exe (not the .7z content packages)
           $exes = @(Get-ChildItem .\release\*.exe) + @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
           if (-not $exes) { Write-Warning "No .exe files found"; exit 0 }
           foreach ($exe in $exes) {
@@ -108,7 +103,23 @@ jobs:
               -Wait -PassThru -NoNewWindow
             if ($p.ExitCode -ne 0) { throw "Signing failed for $($exe.Name) (exit $($p.ExitCode))" }
           }
-          Write-Host "All installers signed successfully."
+
+      - name: Verify signatures
+        shell: pwsh
+        run: |
+          $failed = $false
+          $exes = @(Get-ChildItem .\release\*.exe) + @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
+          foreach ($exe in $exes) {
+            $sig = Get-AuthenticodeSignature $exe.FullName
+            $subject = $sig.SignerCertificate?.Subject ?? "(none)"
+            Write-Host "$($exe.Name): status=$($sig.Status) signer=$subject"
+            if ($sig.Status -ne "Valid") {
+              Write-Error "$($exe.Name) is NOT properly signed (status=$($sig.Status))"
+              $failed = $true
+            }
+          }
+          if ($failed) { throw "One or more installers failed signature verification — check ESIGNER_TOTP_SECRET" }
+          Write-Host "All signatures verified OK."
 
       - name: Create draft release
         env:
@@ -120,28 +131,22 @@ jobs:
           $tag     = "v$version-build$build"
           $title   = "VPNUK $version (build $build)"
 
-          # Rename full installer
           foreach ($exe in (Get-ChildItem .\release\*.exe)) {
             $newName = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
             Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $newName)
           }
-          # Rename web installer exe
           foreach ($exe in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)) {
             $newName = $exe.Name -replace ' ', '-' -replace '\.exe$', "-web-build$build.exe"
             Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $newName)
           }
 
           $artifacts = @()
-          # Full all-in-one installer
-          foreach ($f in (Get-ChildItem .\release\*.exe))                                  { $artifacts += $f.FullName }
-          # Web installer exe + .nsis.7z content packages (needed by the web installer)
-          foreach ($f in (Get-ChildItem .\release\nsis-web\*.exe   -ErrorAction SilentlyContinue)) { $artifacts += $f.FullName }
-          foreach ($f in (Get-ChildItem .\release\nsis-web\*.7z    -ErrorAction SilentlyContinue)) { $artifacts += $f.FullName }
-          # Auto-update manifest
+          foreach ($f in (Get-ChildItem .\release\*.exe))                                         { $artifacts += $f.FullName }
+          foreach ($f in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue))  { $artifacts += $f.FullName }
+          foreach ($f in (Get-ChildItem .\release\nsis-web\*.7z  -ErrorAction SilentlyContinue))  { $artifacts += $f.FullName }
           if (Test-Path ".\release\latest.yml") { $artifacts += (Resolve-Path ".\release\latest.yml").Path }
 
-          Write-Host "Tag: $tag"
-          Write-Host "Title: $title"
+          Write-Host "Tag: $tag | Title: $title"
           $artifacts | ForEach-Object { Write-Host "Artifact: $_" }
 
           gh release create "$tag" --title "$title" --draft --notes "Build $build" @artifacts
