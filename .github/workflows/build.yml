@@ -65,8 +65,8 @@ jobs:
         run: yarn run electron-builder --win --publish=never
 
       # ── EV Code Signing via ssl.com eSigner ──────────────────────────────────
-      # Downloads CodeSignTool and signs every .exe in .\release using the
-      # cloud-based EV certificate.  No hardware token required.
+      # Downloads CodeSignTool and signs every .exe in .\release.
+      # CODE_SIGN_TOOL_PATH must be set so the bat finds its bundled JDK.
       # Required secrets: ESIGNER_USERNAME, ESIGNER_PASSWORD,
       #                   ESIGNER_CREDENTIAL_ID, ESIGNER_TOTP_SECRET
       - name: Download CodeSignTool
@@ -76,8 +76,11 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\cst.zip" -UseBasicParsing
           Expand-Archive "$env:TEMP\cst.zip" -DestinationPath "$env:TEMP\cst" -Force
           $bat = (Get-ChildItem "$env:TEMP\cst" -Filter "CodeSignTool.bat" -Recurse | Select-Object -First 1).FullName
-          Write-Host "CodeSignTool: $bat"
-          echo "CST_BAT=$bat" >> $env:GITHUB_ENV
+          $dir = Split-Path $bat -Parent
+          Write-Host "CodeSignTool bat : $bat"
+          Write-Host "CodeSignTool dir : $dir"
+          echo "CST_BAT=$bat"     >> $env:GITHUB_ENV
+          echo "CST_DIR=$dir"     >> $env:GITHUB_ENV
 
       - name: Sign installers with eSigner (EV Code Signing)
         shell: pwsh
@@ -86,14 +89,23 @@ jobs:
           ESIGNER_PASSWORD:      ${{ secrets.ESIGNER_PASSWORD }}
           ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
           ESIGNER_TOTP_SECRET:   ${{ secrets.ESIGNER_TOTP_SECRET }}
+          CODE_SIGN_TOOL_PATH:   ${{ env.CST_DIR }}
         run: |
           $exes = Get-ChildItem .\release\*.exe
           if (-not $exes) { Write-Warning "No .exe files found in .\release"; exit 0 }
           foreach ($exe in $exes) {
             Write-Host "Signing: $($exe.Name)"
-            $cmd = "`"$env:CST_BAT`" sign -username=`"$env:ESIGNER_USERNAME`" -password=`"$env:ESIGNER_PASSWORD`" -credential_id=`"$env:ESIGNER_CREDENTIAL_ID`" -totp_secret=`"$env:ESIGNER_TOTP_SECRET`" -input_file_path=`"$($exe.FullName)`" -override=true"
-            cmd.exe /c $cmd
-            if ($LASTEXITCODE -ne 0) { throw "Signing failed for $($exe.Name) (exit $LASTEXITCODE)" }
+            $p = Start-Process -FilePath $env:CST_BAT `
+              -ArgumentList "sign",
+                "-username=$env:ESIGNER_USERNAME",
+                "-password=$env:ESIGNER_PASSWORD",
+                "-credential_id=$env:ESIGNER_CREDENTIAL_ID",
+                "-totp_secret=$env:ESIGNER_TOTP_SECRET",
+                "-input_file_path=$($exe.FullName)",
+                "-override=true" `
+              -WorkingDirectory $env:CST_DIR `
+              -Wait -PassThru -NoNewWindow
+            if ($p.ExitCode -ne 0) { throw "Signing failed for $($exe.Name) (exit $($p.ExitCode))" }
           }
           Write-Host "All installers signed successfully."
 
