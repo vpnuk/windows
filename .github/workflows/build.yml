@@ -75,8 +75,8 @@ jobs:
           $dir = Split-Path $bat -Parent
           Write-Host "CodeSignTool bat : $bat"
           Write-Host "CodeSignTool dir : $dir"
-          echo "CST_BAT=$bat" >> $env:GITHUB_ENV
-          echo "CST_DIR=$dir" >> $env:GITHUB_ENV
+          echo "CST_BAT=$bat"  >> $env:GITHUB_ENV
+          echo "CST_DIR=$dir"  >> $env:GITHUB_ENV
 
       - name: Sign installers with eSigner (EV Code Signing)
         shell: pwsh
@@ -85,40 +85,50 @@ jobs:
           ESIGNER_PASSWORD:      ${{ secrets.ESIGNER_PASSWORD }}
           ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
           ESIGNER_TOTP_SECRET:   ${{ secrets.ESIGNER_TOTP_SECRET }}
-          CODE_SIGN_TOOL_PATH:   ${{ env.CST_DIR }}
         run: |
-          $exes = @(Get-ChildItem .\release\*.exe) + @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
+          $exes = @(Get-ChildItem .\release\*.exe) +
+                  @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
           if (-not $exes) { Write-Warning "No .exe files found"; exit 0 }
+
           foreach ($exe in $exes) {
             Write-Host "Signing: $($exe.FullName)"
-            $p = Start-Process -FilePath $env:CST_BAT `
-              -ArgumentList "sign",
+            # Pass -input_file_path as a single quoted string so spaces in the
+            # filename are not treated as argument separators by the Java CLI.
+            $inputArg = "-input_file_path=`"$($exe.FullName)`""
+            $p = Start-Process `
+              -FilePath    $env:CST_BAT `
+              -ArgumentList @(
+                "sign",
                 "-username=$env:ESIGNER_USERNAME",
                 "-password=$env:ESIGNER_PASSWORD",
                 "-credential_id=$env:ESIGNER_CREDENTIAL_ID",
                 "-totp_secret=$env:ESIGNER_TOTP_SECRET",
-                "-input_file_path=$($exe.FullName)",
-                "-override=true" `
+                $inputArg,
+                "-override=true"
+              ) `
               -WorkingDirectory $env:CST_DIR `
               -Wait -PassThru -NoNewWindow
-            if ($p.ExitCode -ne 0) { throw "Signing failed for $($exe.Name) (exit $($p.ExitCode))" }
+            if ($p.ExitCode -ne 0) {
+              throw "Signing failed for $($exe.Name) (exit $($p.ExitCode))"
+            }
           }
 
       - name: Verify signatures
         shell: pwsh
         run: |
           $failed = $false
-          $exes = @(Get-ChildItem .\release\*.exe) + @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
+          $exes = @(Get-ChildItem .\release\*.exe) +
+                  @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
           foreach ($exe in $exes) {
-            $sig = Get-AuthenticodeSignature $exe.FullName
+            $sig     = Get-AuthenticodeSignature $exe.FullName
             $subject = $sig.SignerCertificate?.Subject ?? "(none)"
-            Write-Host "$($exe.Name): status=$($sig.Status) signer=$subject"
+            Write-Host "$($exe.Name): status=$($sig.Status)  signer=$subject"
             if ($sig.Status -ne "Valid") {
               Write-Error "$($exe.Name) is NOT properly signed (status=$($sig.Status))"
               $failed = $true
             }
           }
-          if ($failed) { throw "One or more installers failed signature verification — check ESIGNER_TOTP_SECRET" }
+          if ($failed) { throw "One or more installers failed signature verification" }
           Write-Host "All signatures verified OK."
 
       - name: Create draft release
@@ -132,12 +142,12 @@ jobs:
           $title   = "VPNUK $version (build $build)"
 
           foreach ($exe in (Get-ChildItem .\release\*.exe)) {
-            $newName = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
-            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $newName)
+            $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
+            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
           }
           foreach ($exe in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)) {
-            $newName = $exe.Name -replace ' ', '-' -replace '\.exe$', "-web-build$build.exe"
-            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $newName)
+            $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-web-build$build.exe"
+            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
           }
 
           $artifacts = @()
