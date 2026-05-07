@@ -65,8 +65,8 @@ jobs:
         run: yarn run electron-builder --win --publish=never
 
       # ── EV Code Signing via ssl.com eSigner ──────────────────────────────────
-      # Downloads CodeSignTool and signs every .exe in .\release.
-      # CODE_SIGN_TOOL_PATH must be set so the bat finds its bundled JDK.
+      # Signs both the full installer (release\*.exe) and the web installer
+      # (release\nsis-web\*.exe) using the cloud-based EV certificate.
       # Required secrets: ESIGNER_USERNAME, ESIGNER_PASSWORD,
       #                   ESIGNER_CREDENTIAL_ID, ESIGNER_TOTP_SECRET
       - name: Download CodeSignTool
@@ -79,8 +79,8 @@ jobs:
           $dir = Split-Path $bat -Parent
           Write-Host "CodeSignTool bat : $bat"
           Write-Host "CodeSignTool dir : $dir"
-          echo "CST_BAT=$bat"     >> $env:GITHUB_ENV
-          echo "CST_DIR=$dir"     >> $env:GITHUB_ENV
+          echo "CST_BAT=$bat" >> $env:GITHUB_ENV
+          echo "CST_DIR=$dir" >> $env:GITHUB_ENV
 
       - name: Sign installers with eSigner (EV Code Signing)
         shell: pwsh
@@ -91,10 +91,11 @@ jobs:
           ESIGNER_TOTP_SECRET:   ${{ secrets.ESIGNER_TOTP_SECRET }}
           CODE_SIGN_TOOL_PATH:   ${{ env.CST_DIR }}
         run: |
-          $exes = Get-ChildItem .\release\*.exe
-          if (-not $exes) { Write-Warning "No .exe files found in .\release"; exit 0 }
+          # Collect both the full installer and the web installer
+          $exes = @(Get-ChildItem .\release\*.exe) + @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
+          if (-not $exes) { Write-Warning "No .exe files found"; exit 0 }
           foreach ($exe in $exes) {
-            Write-Host "Signing: $($exe.Name)"
+            Write-Host "Signing: $($exe.FullName)"
             $p = Start-Process -FilePath $env:CST_BAT `
               -ArgumentList "sign",
                 "-username=$env:ESIGNER_USERNAME",
@@ -119,13 +120,20 @@ jobs:
           $tag     = "v$version-build$build"
           $title   = "VPNUK $version (build $build)"
 
+          # Rename and collect full installer
           foreach ($exe in (Get-ChildItem .\release\*.exe)) {
             $newName = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
             Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $newName)
           }
+          # Rename and collect web installer
+          foreach ($exe in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)) {
+            $newName = $exe.Name -replace ' ', '-' -replace '\.exe$', "-web-build$build.exe"
+            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $newName)
+          }
 
           $artifacts = @()
-          foreach ($exe in (Get-ChildItem .\release\*.exe)) { $artifacts += $exe.FullName }
+          foreach ($exe in (Get-ChildItem .\release\*.exe))           { $artifacts += $exe.FullName }
+          foreach ($exe in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)) { $artifacts += $exe.FullName }
           if (Test-Path ".\release\latest.yml") { $artifacts += (Resolve-Path ".\release\latest.yml").Path }
 
           Write-Host "Tag: $tag"
