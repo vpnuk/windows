@@ -70,18 +70,19 @@ jobs:
           echo "CST_BAT=$bat" >> $env:GITHUB_ENV
           echo "CST_DIR=$dir" >> $env:GITHUB_ENV
 
-      # ── Phase 1: unpack all arches (dir target only — no NSIS yet) ─────────
-      # electron-builder's NSIS assembler re-stamps VPNUK.exe after packaging,
-      # which would strip any signature added by an afterPack hook.
-      # By separating packaging (--dir) from installer assembly (--prepackaged),
-      # we sign VPNUK.exe once between the two phases and the signature survives.
-      - name: Phase 1 — unpack app (all arches, no installer)
+      # ── Phase 1: unpack all arches (no NSIS installer yet) ────────────────
+      # Pass arches explicitly — --win dir alone only builds the default arch.
+      # The NSIS assembler re-stamps VPNUK.exe after afterPack runs, stripping
+      # any signature.  By separating "dir" from "--prepackaged nsis" we sign
+      # once between the two phases and the signature survives into the installer.
+      - name: Phase 1 — unpack app (x64, ia32, arm64; no installer)
         env:
           GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: yarn run electron-builder --win dir --publish=never
+        run: yarn run electron-builder --win dir --x64 --ia32 --arm64 --publish=never
 
       # ── Phase 2: sign VPNUK.exe in every unpacked arch dir ────────────────
+      # CodeSignTool requires absolute paths (-input_file_path / -output_dir_path).
       - name: Phase 2 — sign VPNUK.exe in all arch dirs
         shell: pwsh
         env:
@@ -92,16 +93,18 @@ jobs:
         run: |
           $failed = $false
           foreach ($arch in @('win-unpacked', 'win-ia32-unpacked', 'win-arm64-unpacked')) {
-            $exe = ".\release\$arch\VPNUK.exe"
-            if (-not (Test-Path $exe)) {
-              Write-Host "SKIP (not found): $exe"
+            $exeRel = ".\release\$arch\VPNUK.exe"
+            if (-not (Test-Path $exeRel)) {
+              Write-Host "SKIP (not found): $exeRel"
               continue
             }
-            $origSize = (Get-Item $exe).Length
-            Write-Host "Signing [$arch] $exe  ($([math]::Round($origSize/1MB,1)) MB)"
-
-            $outDir = "$env:TEMP\signed-$arch"
+            # Absolute paths required by CodeSignTool
+            $exe     = (Resolve-Path $exeRel).Path
+            $outDir  = "$env:TEMP\signed-$arch"
             New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+
+            $origSize = (Get-Item $exe).Length
+            Write-Host "Signing [$arch]  $exe  ($([math]::Round($origSize/1MB,1)) MB)"
 
             $p = Start-Process `
               -FilePath    $env:CST_BAT `
@@ -120,27 +123,20 @@ jobs:
 
             if ($p.ExitCode -ne 0) {
               Write-Host "ERROR: CodeSignTool exit $($p.ExitCode) for $arch"
-              $failed = $true
-              continue
+              $failed = $true; continue
             }
 
             $signed = Join-Path $outDir "VPNUK.exe"
             if (-not (Test-Path $signed)) {
               Write-Host "ERROR: signed output not found at $signed"
-              $failed = $true
-              continue
-            }
-
-            $signedSize = (Get-Item $signed).Length
-            if ($signedSize -le $origSize) {
-              Write-Host "WARNING: signed file ($signedSize) not larger than original ($origSize)"
+              $failed = $true; continue
             }
 
             Copy-Item $signed $exe -Force
 
             $sig     = Get-AuthenticodeSignature $exe
             $subject = $sig.SignerCertificate?.Subject ?? "(none)"
-            Write-Host "  Result: status=$($sig.Status)  signer=$subject  size=$((Get-Item $exe).Length)"
+            Write-Host "  -> status=$($sig.Status)  signer=$subject  size=$((Get-Item $exe).Length)"
             if ($sig.Status -ne 'Valid') {
               Write-Host "ERROR: signature invalid for $arch\VPNUK.exe"
               $failed = $true
@@ -149,22 +145,27 @@ jobs:
           if ($failed) { throw "One or more VPNUK.exe files could not be signed." }
           Write-Host "All VPNUK.exe files signed OK."
 
-      # ── Phase 3: build NSIS installers from the pre-signed dirs ───────────
-      # --prepackaged tells electron-builder to skip the packaging step and
-      # build the installer directly from the supplied directory.
+      # ── Phase 3: build NSIS installers from the pre-signed dirs ──────────
+      # --prepackaged tells electron-builder to skip packing and build the
+      # installer from the supplied pre-existing directory.
+      # nsis (multi-arch x64+ia32+arm64) and nsis-web (x64 stub + 7z) are
+      # both built from the signed win-unpacked x64 dir.
       - name: Phase 3 — build NSIS installers from pre-signed x64 dir
         env:
           GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: |
-          yarn run electron-builder --win nsis     --x64 --prepackaged release\win-unpacked   --publish=never
-          yarn run electron-builder --win nsis-web --x64 --prepackaged release\win-unpacked   --publish=never
-
-      # ── Diagnostic: confirm VPNUK.exe is signed in the nsis-web 7z ────────
-      - name: Diagnose — verify VPNUK.exe inside nsis-web 7z
         shell: pwsh
         run: |
-          Write-Host "=== win*-unpacked VPNUK.exe signatures (after Phase 3) ==="
+          $preDir = (Resolve-Path ".\release\win-unpacked").Path
+          Write-Host "Pre-packaged dir: $preDir"
+          yarn run electron-builder --win nsis     --x64 --prepackaged $preDir --publish=never
+          yarn run electron-builder --win nsis-web --x64 --prepackaged $preDir --publish=never
+
+      # ── Diagnostic: confirm VPNUK.exe is signed at each point ─────────────
+      - name: Diagnose — signatures in win*-unpacked and nsis-web 7z
+        shell: pwsh
+        run: |
+          Write-Host "=== win*-unpacked VPNUK.exe (after Phase 3) ==="
           foreach ($dir in (Get-ChildItem .\release -Directory -Filter "win*-unpacked")) {
             $exe = Join-Path $dir.FullName "VPNUK.exe"
             if (Test-Path $exe) {
@@ -182,9 +183,10 @@ jobs:
             $extracted = Join-Path $outTmp "VPNUK.exe"
             if (Test-Path $extracted) {
               $sig = Get-AuthenticodeSignature $extracted
-              Write-Host "nsis-web\$($z.Name) -> VPNUK.exe  size=$((Get-Item $extracted).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
+              Write-Host "$($z.Name) -> VPNUK.exe  size=$((Get-Item $extracted).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
             } else {
-              Write-Host "VPNUK.exe not found in 7z root"
+              Write-Host "VPNUK.exe not found in 7z root — listing:"
+              & 7z l $z.FullName VPNUK.exe
             }
           } else {
             Write-Host "No nsis-web 7z found"
@@ -211,7 +213,7 @@ jobs:
                 "-password=$env:ESIGNER_PASSWORD",
                 "-credential_id=$env:ESIGNER_CREDENTIAL_ID",
                 "-totp_secret=$env:ESIGNER_TOTP_SECRET",
-                "-input_file_path=`"$($exe.FullName)`"",
+                "-input_file_path=$($exe.FullName)",
                 "-override=true"
               ) `
               -WorkingDirectory $env:CST_DIR `
