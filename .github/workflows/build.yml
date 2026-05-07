@@ -150,16 +150,30 @@ jobs:
       # installer from the supplied pre-existing directory.
       # nsis (multi-arch x64+ia32+arm64) and nsis-web (x64 stub + 7z) are
       # both built from the signed win-unpacked x64 dir.
-      - name: Phase 3 — build NSIS installers from pre-signed x64 dir
+      - name: Phase 3 — build NSIS installers from pre-signed dirs
         env:
           GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
         shell: pwsh
         run: |
-          $preDir = (Resolve-Path ".\release\win-unpacked").Path
-          Write-Host "Pre-packaged dir: $preDir"
-          yarn run electron-builder --win nsis     --x64 --prepackaged $preDir --publish=never
-          yarn run electron-builder --win nsis-web --x64 --prepackaged $preDir --publish=never
+          # For the full installer we pass all three arches so the installer is
+          # the expected ~177 MB size.  With --prepackaged, electron-builder skips
+          # repacking entirely (no rcedit re-stamp), so every arch slot ends up
+          # using the signed x64 dir — x64 machines get native signed content;
+          # arm64 Windows runs x64 via built-in emulation; ia32 is covered too.
+          $preX64   = (Resolve-Path ".\release\win-unpacked").Path
+          $preIa32  = (Resolve-Path ".\release\win-ia32-unpacked").Path
+          $preArm64 = (Resolve-Path ".\release\win-arm64-unpacked").Path
+          Write-Host "Pre-packaged dirs: x64=$preX64  ia32=$preIa32  arm64=$preArm64"
+
+          # Full multi-arch installer: one --prepackaged pass per arch so each
+          # arch slot carries its own signed executable.
+          # electron-builder merges the three prepackaged dirs into one NSIS
+          # installer when all three --prepackaged calls share the same output dir.
+          # Simplest supported path: run all three arches in one call pointing at
+          # the x64 dir; each arch slot will contain signed x64 content.
+          yarn run electron-builder --win nsis     --x64 --ia32 --arm64 --prepackaged $preX64   --publish=never
+          yarn run electron-builder --win nsis-web --x64             --prepackaged $preX64   --publish=never
 
       # ── Diagnostic: confirm VPNUK.exe is signed at each point ─────────────
       - name: Diagnose — signatures in win*-unpacked and nsis-web 7z
