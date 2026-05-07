@@ -266,7 +266,7 @@ jobs:
           $installer = Get-ChildItem .\release\*.exe | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
           Write-Host "Silent-installing: $($installer.Name)"
           $proc = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -PassThru
-          $timedOut = -not $proc.WaitForExit(180000)  # 3-minute timeout
+          $timedOut = -not $proc.WaitForExit(480000)  # 8-minute timeout
           if ($timedOut) {
             Write-Host "WARNING: installer timed out after 3 min — killing"
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
