@@ -104,19 +104,14 @@ send:
     ; available privilege level.  Desktop and Start Menu shortcuts are then
     ; rewritten to target schtasks.exe (which is asInvoker and carries no UAC
     ; shield) while keeping the VPNUK icon — so the shield never appears.
+    ; ─── Register ONDEMAND elevated task ─────────────────────────────────────
+    ; Shortcuts are created by customCreateDesktopIcon/customCreateStartMenuIcon.
     nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
     Pop $0
     Pop $0
     nsExec::ExecToStack 'schtasks /Create /TN "VPNUK" /TR "$\"$INSTDIR\VPNUK.exe$\"" /SC ONDEMAND /RL HIGHEST /F'
     Pop $0
-    ${If} $0 == 0
-        Pop $0
-        SetShellVarContext all
-        CreateShortCut "$DESKTOP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
-        CreateShortCut "$SMPROGRAMS\VPNUK\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
-    ${Else}
-        Pop $0
-    ${EndIf}
+    Pop $0
 !macroend
 
 ; --------------- OVPN ----------------
@@ -557,15 +552,10 @@ FunctionEnd
         SetShellVarContext all
 
         ; ─── Task Scheduler cleanup ───────────────────────────────────────────
-        nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
-        Pop $0
-        Pop $0
-
-        ; ----------- PSModulePath ------------
-        call un.PSModulePath
-
-        GetDlgItem $0 $hWndParent 1 ; 'Next' button handle
-        EnableWindow $0 1
-    FunctionEnd
-    !pragma warning enable 6040
-!macroend
+    ; ─── Register ONDEMAND elevated task ─────────────────────────────────────
+    ; Shortcuts are created by customCreateDesktopIcon/customCreateStartMenuIcon.
+    nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
+    Pop $0
+    Pop $0
+    Pop $0
+    Pop $0
