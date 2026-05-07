@@ -47,6 +47,12 @@
             "ia32",
             "arm64"
           ]
+        },
+        {
+          "target": "nsis-web",
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "app/assets/icon.ico",
