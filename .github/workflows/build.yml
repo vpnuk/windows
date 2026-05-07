@@ -58,9 +58,6 @@ jobs:
       - name: Build React app
         run: yarn run build-react-nsis
 
-      # Download CodeSignTool BEFORE electron-builder so the afterPack hook
-      # can sign each arch's VPNUK.exe while it is still unpacked (before NSIS
-      # assembles the combined installer from the signed content).
       - name: Download CodeSignTool
         shell: pwsh
         run: |
@@ -73,10 +70,8 @@ jobs:
           echo "CST_BAT=$bat"  >> $env:GITHUB_ENV
           echo "CST_DIR=$dir"  >> $env:GITHUB_ENV
 
-      # afterPack.js signs VPNUK.exe for every arch immediately after electron-builder
-      # unpacks it, before NSIS assembles the combined installer.
-      # The win*-unpacked dirs are intermediate artifacts that may be cleaned up
-      # after packaging — what matters is that NSIS read signed exes during assembly.
+      # afterPack.js: signs VPNUK.exe per arch into an explicit temp dir,
+      # then copies the signed file back over the original in win-unpacked.
       - name: Package with electron-builder (signs app exe via afterPack hook)
         env:
           GH_TOKEN:              ${{ secrets.GITHUB_TOKEN }}
@@ -88,7 +83,43 @@ jobs:
           ESIGNER_TOTP_SECRET:   ${{ secrets.ESIGNER_TOTP_SECRET }}
         run: yarn run electron-builder --win --publish=never
 
-      # Sign the NSIS installer wrappers (.exe files in release/).
+      # ── Diagnostic: verify every VPNUK.exe in the unpacked dirs AND inside
+      # the nsis-web 7z so we know exactly where the signature is (or isn't).
+      - name: Diagnose VPNUK.exe signatures post-build
+        shell: pwsh
+        run: |
+          Write-Host "=== win*-unpacked VPNUK.exe signatures ==="
+          foreach ($dir in (Get-ChildItem .\release -Directory -Filter "win*-unpacked")) {
+            $exe = Join-Path $dir.FullName "VPNUK.exe"
+            if (Test-Path $exe) {
+              $sig     = Get-AuthenticodeSignature $exe
+              $subject = $sig.SignerCertificate?.Subject ?? "(none)"
+              Write-Host "$($dir.Name)\VPNUK.exe  size=$((Get-Item $exe).Length)  status=$($sig.Status)  signer=$subject"
+            } else {
+              Write-Host "$($dir.Name)\VPNUK.exe  NOT FOUND"
+            }
+          }
+
+          Write-Host ""
+          Write-Host "=== VPNUK.exe inside nsis-web 7z ==="
+          $z = Get-ChildItem .\release\nsis-web\*.7z -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($z) {
+            $outTmp = "$env:TEMP\nsis7z_check"
+            New-Item -ItemType Directory -Path $outTmp -Force | Out-Null
+            & 7z e $z.FullName VPNUK.exe "-o$outTmp" -y | Out-Null
+            $extracted = Join-Path $outTmp "VPNUK.exe"
+            if (Test-Path $extracted) {
+              $sig     = Get-AuthenticodeSignature $extracted
+              $subject = $sig.SignerCertificate?.Subject ?? "(none)"
+              Write-Host "nsis-web\$($z.Name) -> VPNUK.exe  size=$((Get-Item $extracted).Length)  status=$($sig.Status)  signer=$subject"
+            } else {
+              Write-Host "VPNUK.exe not found directly in 7z root — may be in a subdirectory"
+              & 7z l $z.FullName VPNUK.exe
+            }
+          } else {
+            Write-Host "No nsis-web 7z found"
+          }
+
       - name: Sign installer wrappers with eSigner
         shell: pwsh
         env:
@@ -121,11 +152,6 @@ jobs:
             }
           }
 
-      # Only verify the installer wrappers — the win*-unpacked directories are
-      # intermediate build artifacts that electron-builder may clean up or
-      # regenerate after the NSIS step. The app exe inside the installer was
-      # signed during the afterPack hook (confirmed by "Code signed successfully"
-      # log lines above) before NSIS assembled the final package.
       - name: Verify installer signatures
         shell: pwsh
         run: |
