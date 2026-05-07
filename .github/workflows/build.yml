@@ -265,9 +265,15 @@ jobs:
           # Silently install the full NSIS installer — CI runner is already Administrator
           $installer = Get-ChildItem .\release\*.exe | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
           Write-Host "Silent-installing: $($installer.Name)"
-          $p = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait -PassThru
-          Write-Host "Installer exit code: $($p.ExitCode)"
-          Start-Sleep -Seconds 8  # allow post-install steps to finish
+          $proc = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -PassThru
+          $timedOut = -not $proc.WaitForExit(180000)  # 3-minute timeout
+          if ($timedOut) {
+            Write-Host "WARNING: installer timed out after 3 min — killing"
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "Installer exit code: $($proc.ExitCode)"
+          }
+          Start-Sleep -Seconds 5  # allow post-install steps to settle
 
           # Check all likely install locations
           $candidates = @(
