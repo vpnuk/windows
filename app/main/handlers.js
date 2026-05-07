@@ -355,14 +355,24 @@ ipcMain.on('wg-update-request', async (event, arg) => {
 });
 
 // ─── Auto-run (Windows startup) ───────────────────────────────────────────────
+// app.setLoginItemSettings() silently fails for admin-elevated apps because
+// Windows will not auto-launch a requireAdministrator process at login
+// without a UAC prompt (which no one sees at boot time).
+// Instead we register an ONLOGON scheduled task at HIGHEST privilege —
+// the same mechanism used by the desktop shortcut — so the app starts
+// elevated without any UAC prompt.
 
 ipcMain.on('auto-run-toggle', (_, enable) => {
     isDev && console.log('auto-run-toggle', enable);
+    const cp = require('child_process');
     const exePath = app.getPath('exe');
     if (enable) {
-        app.setLoginItemSettings({ openAtLogin: true, path: exePath });
+        cp.exec(
+            `schtasks /Create /TN "VPNUK-Startup" /TR "\"${exePath}\"" /SC ONLOGON /RL HIGHEST /DELAY 0001:00 /F`,
+            err => { isDev && err && console.error('auto-run enable:', err.message); }
+        );
     } else {
-        app.setLoginItemSettings({ openAtLogin: false });
+        cp.exec('schtasks /Delete /TN "VPNUK-Startup" /F', () => {});
     }
 });
 
