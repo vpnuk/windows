@@ -1,4 +1,15 @@
 
+; ─── LOAD PROBE ─────────────────────────────────────────────────────────────────
+; The NSIS template calls !insertmacro customHeader unconditionally (installer.nsi L39).
+; If this file is correctly included, customHeader runs and writes a probe file.
+; CI checks for the probe file to confirm extension.nsh was actually loaded.
+!macro customHeader
+    FileOpen $R9 "$TEMP\extension_nsh_loaded.txt" w
+    FileWrite $R9 "extension.nsh loaded OK"
+    FileClose $R9
+!macroend
+
+
 ; ─── CRITICAL: !define required so electron-builder's !ifdef checks fire ───────
 ; NSIS !macro NAME alone does NOT satisfy !ifdef NAME in NSIS 3.x.
 
