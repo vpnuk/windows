@@ -213,7 +213,7 @@ jobs:
                 "-password=$env:ESIGNER_PASSWORD",
                 "-credential_id=$env:ESIGNER_CREDENTIAL_ID",
                 "-totp_secret=$env:ESIGNER_TOTP_SECRET",
-                "-input_file_path=$($exe.FullName)",
+                "-input_file_path=`"$($exe.FullName)`"",
                 "-override=true"
               ) `
               -WorkingDirectory $env:CST_DIR `
