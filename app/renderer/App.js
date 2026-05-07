@@ -246,6 +246,13 @@ ipcRenderer.on('default-gateway-response', (_, arg) => {
             acCancelRetry();
             runInAction(() => { store.settings.autoConnectWaiting = false; });
             const profile = store.profiles.currentProfile;
+            // Auto-init server (same guard as useConnectAction)
+            if (profile && !profile.server?.host) {
+                const catalog = Servers.getCatalog(profile.serverType || 'shared');
+                if (catalog.length > 0) {
+                    runInAction(() => { profile.server = catalog[0]; });
+                }
+            }
             if (profile?.server?.host) {
                 ipcRenderer.send('connection-start', {
                     profile,
