@@ -58,11 +58,30 @@ jobs:
       - name: Build React app
         run: yarn run build-react-nsis
 
-      - name: Package with electron-builder
+      - name: Package with electron-builder (unsigned)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
         run: yarn run electron-builder --win --publish=never
+
+      # ── EV Code Signing via ssl.com eSigner ──────────────────────────────────
+      # Signs every .exe in the release folder using the cloud-based EV cert.
+      # No hardware token or physical access required — credentials are stored
+      # as GitHub Actions secrets and the TOTP is derived automatically.
+      # Required secrets: ESIGNER_USERNAME, ESIGNER_PASSWORD,
+      #                   ESIGNER_CREDENTIAL_ID, ESIGNER_TOTP_SECRET
+      - name: Sign installers with eSigner (EV Code Signing)
+        uses: ssl-com/esigner-codesign@v1.0.0
+        with:
+          username:         ${{ secrets.ESIGNER_USERNAME }}
+          password:         ${{ secrets.ESIGNER_PASSWORD }}
+          credential_id:    ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          totp_secret:      ${{ secrets.ESIGNER_TOTP_SECRET }}
+          dir_name:         '.\release'
+          file_name:        '*.exe'
+          environment_name: PROD
+          malware_block:    false
+          override:         true
 
       - name: Create draft release
         env:
