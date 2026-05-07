@@ -71,14 +71,14 @@ jobs:
       # Required secrets: ESIGNER_USERNAME, ESIGNER_PASSWORD,
       #                   ESIGNER_CREDENTIAL_ID, ESIGNER_TOTP_SECRET
       - name: Sign installers with eSigner (EV Code Signing)
-        uses: ssl-com/esigner-codesign@v1.0.0
+        uses: SSLcom/esigner-codesign@v1.3.2
         with:
+          command:          sign
           username:         ${{ secrets.ESIGNER_USERNAME }}
           password:         ${{ secrets.ESIGNER_PASSWORD }}
           credential_id:    ${{ secrets.ESIGNER_CREDENTIAL_ID }}
           totp_secret:      ${{ secrets.ESIGNER_TOTP_SECRET }}
-          dir_name:         '.\release'
-          file_name:        '*.exe'
+          dir_path:         '.\\release'
           environment_name: PROD
           malware_block:    false
           override:         true
