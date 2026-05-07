@@ -79,6 +79,7 @@ jobs:
         env:
           GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          DEBUG:                       "electron-builder"
         run: yarn run electron-builder --win dir --x64 --ia32 --arm64 --publish=never
 
       # ── Phase 2: sign VPNUK.exe in every unpacked arch dir ────────────────
@@ -154,6 +155,7 @@ jobs:
         env:
           GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          DEBUG:                       "electron-builder"
         shell: pwsh
         run: |
           # For the full installer we pass all three arches so the installer is
@@ -191,20 +193,41 @@ jobs:
           $env:TEMP = $origTemp
           $env:TMP  = $origTemp
 
-          # Dump any generated .nsi files — look for our custom macro references
+          # Dump custom macro refs from ALL template .nsh and .nsi files
           Write-Host ""
-          Write-Host "=== Searching for generated .nsi files ==="
+          Write-Host "=== Template files: grep for custom macro / include references ==="
+          $tplDir = "node_modules/app-builder-lib/templates/nsis"
+          Write-Host "Template files in $tplDir :"
+          Get-ChildItem $tplDir -Recurse | Where-Object { -not $_.PSIsContainer } | ForEach-Object { Write-Host "  $($_.Name)" }
+          Write-Host ""
+          Get-ChildItem $tplDir -Recurse -Include "*.nsh","*.nsi" | ForEach-Object {
+            $lines = Get-Content $_.FullName
+            $matches2 = @()
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+              if ($lines[$i] -match "customCreateDesktopIcon|customInstall|extension\.nsh|CUSTOM_HEADER|!include.*custom|!ifdef.*custom|!insertmacro.*custom") {
+                $matches2 += "  L$($i+1): $($lines[$i])"
+              }
+            }
+            if ($matches2) {
+              Write-Host "--- $($_.Name) ---"
+              $matches2 | ForEach-Object { Write-Host $_ }
+            }
+          }
+
+          # Also search for generated .nsi files (any extension) in temp dirs
+          Write-Host ""
+          Write-Host "=== Searching for generated installer scripts in temp dirs ==="
           $searchDirs = @($nsisCapture, $origTemp, "D:\a", "$env:LOCALAPPDATA\Temp")
           foreach ($dir in $searchDirs) {
             if (Test-Path $dir) {
-              $nsiFiles = Get-ChildItem $dir -Filter "*.nsi" -Recurse -ErrorAction SilentlyContinue
-              foreach ($f in $nsiFiles) {
-                Write-Host "--- NSI: $($f.FullName) ---"
-                $lines = Get-Content $f.FullName
-                for ($i = 0; $i -lt $lines.Count; $i++) {
-                  $l = $lines[$i]
-                  if ($l -match "customCreateDesktopIcon|customInstall|extension\.nsh|!include|!ifdef.*custom|!insertmacro.*custom") {
-                    Write-Host "  L$($i+1): $l"
+              Get-ChildItem $dir -Filter "*.nsi" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+                if ($_.FullName -notmatch "node_modules") {
+                  Write-Host "GENERATED NSI: $($_.FullName)"
+                  $lines = Get-Content $_.FullName
+                  for ($i = 0; $i -lt $lines.Count; $i++) {
+                    if ($lines[$i] -match "customCreateDesktopIcon|customInstall|extension\.nsh|CUSTOM_HEADER") {
+                      Write-Host "  L$($i+1): $($lines[$i])"
+                    }
                   }
                 }
               }
