@@ -367,6 +367,22 @@ jobs:
           Write-Host "=== schtasks VPNUK task ==="
           schtasks /Query /TN "VPNUK" /FO LIST 2>&1 | ForEach-Object { Write-Host $_ }
 
+          # Check extension.nsh load probe
+          Write-Host ""
+          Write-Host "=== extension.nsh load probe ==="
+          $probePath = "$env:TEMP\extension_nsh_loaded.txt"
+          if (Test-Path $probePath) {
+            Write-Host "PROBE: extension.nsh WAS loaded — $(Get-Content $probePath)"
+          } else {
+            Write-Host "PROBE MISSING: extension.nsh was NOT loaded"
+            # Also check INSTDIR for customInstall probe
+            if (Test-Path "C:\Program Files\VPNUK\customInstall_ran.txt") {
+              Write-Host "INSTDIR probe: customInstall DID run"
+            } else {
+              Write-Host "INSTDIR probe: customInstall did NOT run"
+            }
+          }
+
           # Show desktop shortcut target
           Write-Host ""
           Write-Host "=== Desktop shortcut ==="
