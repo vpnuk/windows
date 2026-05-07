@@ -69,7 +69,7 @@
       "allowToChangeInstallationDirectory": true,
       "installerHeader": "nsis/installerHeader.bmp",
       "installerSidebar": "nsis/installerSidebar.bmp",
-      "runAfterFinish": true,
+      "runAfterFinish": false,
       "include": "nsis/extension.nsh"
     },
     "directories": {
@@ -98,8 +98,7 @@
         ]
       }
     ],
-    "extends": null,
-    "afterPack": "./afterPack.js"
+    "extends": null
   },
   "dependencies": {
     "adm-zip": "^0.5.5",
