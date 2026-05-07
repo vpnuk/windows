@@ -551,11 +551,33 @@ FunctionEnd
         
         SetShellVarContext all
 
-        ; ─── Task Scheduler cleanup ───────────────────────────────────────────
-    ; ─── Register ONDEMAND elevated task ─────────────────────────────────────
-    ; Shortcuts are created by customCreateDesktopIcon/customCreateStartMenuIcon.
-    nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
-    Pop $0
-    Pop $0
-    Pop $0
-    Pop $0
+        ; ─── Task Scheduler cleanup ─────────────────────────────────────
+        nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
+        Pop $0
+        Pop $0
+
+        ; ─── PSModulePath cleanup ───────────────────────────────────────────
+        call un.PSModulePath
+
+        GetDlgItem $0 $hWndParent 1 ; 'Next' button handle
+        EnableWindow $0 1
+    FunctionEnd
+    !pragma warning enable 6040
+!macroend
+
+; ─── Shortcut hook overrides ───────────────────────────────────────────────────
+; electron-builder calls these macros instead of its default shortcut creation.
+; Pointing shortcuts at schtasks.exe avoids the UAC shield that appears when
+; the shortcut target directly carries requireAdministrator.
+; schtasks /Run targets the ONDEMAND task registered in customInstall, which
+; launches VPNUK.exe at HIGHEST privilege without showing a UAC prompt.
+
+!macro customCreateDesktopIcon
+    SetShellVarContext all
+    CreateShortCut "$DESKTOP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
+!macroend
+
+!macro customCreateStartMenuIcon
+    SetShellVarContext all
+    CreateShortCut "$SMPROGRAMS\$ICONS_GROUP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
+!macroend
