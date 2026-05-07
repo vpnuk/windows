@@ -176,7 +176,7 @@ jobs:
           yarn run electron-builder --win nsis-web --x64             --prepackaged $preX64   --publish=never
 
       # ── Diagnostic: confirm VPNUK.exe is signed at each point ─────────────
-      - name: Diagnose — signatures in win*-unpacked and nsis-web 7z
+      - name: Diagnose — signatures in win*-unpacked, nsis-web 7z, and full installer
         shell: pwsh
         run: |
           Write-Host "=== win*-unpacked VPNUK.exe (after Phase 3) ==="
@@ -187,6 +187,7 @@ jobs:
               Write-Host "$($dir.Name)\VPNUK.exe  size=$((Get-Item $exe).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
             }
           }
+
           Write-Host ""
           Write-Host "=== VPNUK.exe inside nsis-web 7z ==="
           $z = Get-ChildItem .\release\nsis-web\*.7z -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -204,6 +205,58 @@ jobs:
             }
           } else {
             Write-Host "No nsis-web 7z found"
+          }
+
+          # ── KEY CHECK: extract VPNUK.exe from inside the compiled full NSIS installer ──
+          # This confirms whether the signature survived into the embedded 7z blocks.
+          # 7z can open NSIS self-extracting archives; for electron-builder multi-arch
+          # the inner archive is a 7z stream — we list first, then extract VPNUK.exe.
+          Write-Host ""
+          Write-Host "=== VPNUK.exe INSIDE compiled full installer (the ground truth) ==="
+          $installer = Get-ChildItem .\release\*.exe | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
+          if ($installer) {
+            Write-Host "Installer: $($installer.Name)  size=$([math]::Round($installer.Length/1MB,1)) MB"
+            $extDir = "$env:TEMP\full_installer_ext"
+            New-Item -ItemType Directory -Path $extDir -Force | Out-Null
+
+            # Step 1: list the NSIS content so we understand the archive structure
+            Write-Host "-- 7z listing of installer contents (filtered) --"
+            & 7z l $installer.FullName 2>&1 | Where-Object { $_ -match "VPNUK|\.7z|\.exe|\.nsis|Date|Size|Name" } | Select-Object -First 40
+
+            # Step 2: extract everything (NSIS stores the app as an inner 7z stream)
+            & 7z e $installer.FullName "-o$extDir" -y 2>&1 | Out-Null
+
+            # Step 3: check for extracted VPNUK.exe or inner 7z files that contain it
+            $vpnExes = Get-ChildItem $extDir -Filter "VPNUK.exe" -ErrorAction SilentlyContinue
+            if ($vpnExes) {
+              foreach ($v in $vpnExes) {
+                $sig = Get-AuthenticodeSignature $v.FullName
+                Write-Host "DIRECT: $($v.Name)  size=$($v.Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
+              }
+            } else {
+              Write-Host "VPNUK.exe not directly in first extraction layer — looking for inner 7z..."
+              $inner7zFiles = Get-ChildItem $extDir -Filter "*.7z" -ErrorAction SilentlyContinue
+              if ($inner7zFiles) {
+                foreach ($inner in $inner7zFiles) {
+                  Write-Host "  Inner archive: $($inner.Name)  size=$([math]::Round($inner.Length/1MB,1)) MB"
+                  $inner2Dir = "$extDir\$($inner.BaseName)"
+                  New-Item -ItemType Directory -Path $inner2Dir -Force | Out-Null
+                  & 7z e $inner.FullName VPNUK.exe "-o$inner2Dir" -y 2>&1 | Out-Null
+                  $v2 = Join-Path $inner2Dir "VPNUK.exe"
+                  if (Test-Path $v2) {
+                    $sig = Get-AuthenticodeSignature $v2
+                    Write-Host "  -> VPNUK.exe  size=$((Get-Item $v2).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
+                  } else {
+                    Write-Host "  -> VPNUK.exe not found in $($inner.Name)"
+                  }
+                }
+              } else {
+                Write-Host "  No inner 7z files found. Listing extracted:"
+                Get-ChildItem $extDir | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)  $($_.Length)" }
+              }
+            }
+          } else {
+            Write-Host "No full installer found"
           }
 
       - name: Sign installer wrappers with eSigner
