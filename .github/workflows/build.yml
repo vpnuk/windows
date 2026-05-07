@@ -58,13 +58,8 @@ jobs:
       - name: Build React app
         run: yarn run build-react-nsis
 
-      - name: Package with electron-builder (unsigned)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: yarn run electron-builder --win --publish=never
-
-      # ── EV Code Signing via ssl.com eSigner ──────────────────────────────────
+      # ── Download CodeSignTool BEFORE electron-builder so the afterPack hook
+      #    can sign each arch's VPNUK.exe while it is still unpacked.
       - name: Download CodeSignTool
         shell: pwsh
         run: |
@@ -73,12 +68,26 @@ jobs:
           Expand-Archive "$env:TEMP\cst.zip" -DestinationPath "$env:TEMP\cst" -Force
           $bat = (Get-ChildItem "$env:TEMP\cst" -Filter "CodeSignTool.bat" -Recurse | Select-Object -First 1).FullName
           $dir = Split-Path $bat -Parent
-          Write-Host "CodeSignTool bat : $bat"
-          Write-Host "CodeSignTool dir : $dir"
+          Write-Host "CodeSignTool dir: $dir"
           echo "CST_BAT=$bat"  >> $env:GITHUB_ENV
           echo "CST_DIR=$dir"  >> $env:GITHUB_ENV
 
-      - name: Sign installers with eSigner (EV Code Signing)
+      # electron-builder calls afterPack.js for every arch it packages.
+      # afterPack.js reads CODE_SIGN_TOOL_PATH + ESIGNER_* and signs VPNUK.exe
+      # before NSIS assembles the installer, so the installed app is signed.
+      - name: Package with electron-builder (signs app exe via afterPack hook)
+        env:
+          GH_TOKEN:              ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          CODE_SIGN_TOOL_PATH:   ${{ env.CST_DIR }}
+          ESIGNER_USERNAME:      ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD:      ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET:   ${{ secrets.ESIGNER_TOTP_SECRET }}
+        run: yarn run electron-builder --win --publish=never
+
+      # Sign the NSIS installer wrappers themselves (the .exe files in release/)
+      - name: Sign installer wrappers with eSigner
         shell: pwsh
         env:
           ESIGNER_USERNAME:      ${{ secrets.ESIGNER_USERNAME }}
@@ -88,12 +97,9 @@ jobs:
         run: |
           $exes = @(Get-ChildItem .\release\*.exe) +
                   @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
-          if (-not $exes) { Write-Warning "No .exe files found"; exit 0 }
-
+          if (-not $exes) { Write-Warning "No installer .exe found"; exit 0 }
           foreach ($exe in $exes) {
-            Write-Host "Signing: $($exe.FullName)"
-            # Pass -input_file_path as a single quoted string so spaces in the
-            # filename are not treated as argument separators by the Java CLI.
+            Write-Host "Signing installer: $($exe.FullName)"
             $inputArg = "-input_file_path=`"$($exe.FullName)`""
             $p = Start-Process `
               -FilePath    $env:CST_BAT `
@@ -113,22 +119,26 @@ jobs:
             }
           }
 
-      - name: Verify signatures
+      - name: Verify all signatures
         shell: pwsh
         run: |
           $failed = $false
-          $exes = @(Get-ChildItem .\release\*.exe) +
-                  @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
-          foreach ($exe in $exes) {
+          # Check installed app executables in unpacked dirs
+          $appExes = Get-ChildItem .\release\win*-unpacked\*.exe -ErrorAction SilentlyContinue |
+                     Where-Object { $_.Name -notlike 'squirrel*' }
+          # Check installer wrappers
+          $installerExes = @(Get-ChildItem .\release\*.exe) +
+                           @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
+          foreach ($exe in ($appExes + $installerExes)) {
             $sig     = Get-AuthenticodeSignature $exe.FullName
             $subject = $sig.SignerCertificate?.Subject ?? "(none)"
             Write-Host "$($exe.Name): status=$($sig.Status)  signer=$subject"
             if ($sig.Status -ne "Valid") {
-              Write-Error "$($exe.Name) is NOT properly signed (status=$($sig.Status))"
+              Write-Error "$($exe.Name) NOT signed (status=$($sig.Status))"
               $failed = $true
             }
           }
-          if ($failed) { throw "One or more installers failed signature verification" }
+          if ($failed) { throw "One or more files failed signature verification" }
           Write-Host "All signatures verified OK."
 
       - name: Create draft release
