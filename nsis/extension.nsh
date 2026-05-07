@@ -1,9 +1,64 @@
+
+; ─── CRITICAL: !define required so electron-builder's !ifdef checks fire ───────
+; NSIS !macro NAME alone does NOT satisfy !ifdef NAME in NSIS 3.x.
+
+; ─── Shortcut hook overrides ────────────────────────────────────────────────────
+; Shortcuts point to schtasks.exe (asInvoker — no UAC shield) which then
+; triggers the ONDEMAND task (registered in customInstall) at HIGHEST privilege.
+; VPNUK.exe is used only as the icon source.
+
+!macro customCreateDesktopIcon
+    ; Write probe so CI can confirm this macro ran
+    FileOpen $0 "$INSTDIR\customCreateDesktopIcon_ran.txt" w
+    FileWrite $0 "customCreateDesktopIcon executed"
+    FileClose $0
+    SetShellVarContext all
+    CreateShortCut "$DESKTOP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
+!macroend
+!define customCreateDesktopIcon
+
+!macro customCreateStartMenuIcon
+    SetShellVarContext all
+    CreateShortCut "$SMPROGRAMS\$ICONS_GROUP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
+!macroend
+!define customCreateStartMenuIcon
+
+; ─── customInstall ──────────────────────────────────────────────────────────────
+!macro customInstall
+    ; Write probe so CI can confirm this macro ran
+    FileOpen $0 "$INSTDIR\customInstall_ran.txt" w
+    FileWrite $0 "customInstall executed"
+    FileClose $0
+
+    nsExec::ExecToStack `powershell [Environment]::SetEnvironmentVariable("PSModulePath", [Environment]::GetEnvironmentVariable("PSModulePath", "Machine") + [System.IO.Path]::PathSeparator + "$INSTDIR\PSModules", "Machine")`
+    Pop $0
+    ${If} $0 != 0
+        Pop $0
+        MessageBox MB_OK "Error setting PSModulePath:$\n$0"
+    ${EndIf}
+
+    ; ─── Task Scheduler ─────────────────────────────────────────────────────────
+    ; Register an on-demand scheduled task that runs VPNUK at the highest
+    ; available privilege level.  Desktop and Start Menu shortcuts target
+    ; schtasks.exe (asInvoker, no UAC shield).
+    nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
+    Pop $0
+    Pop $0
+    nsExec::ExecToStack 'schtasks /Create /TN "VPNUK" /TR "$\"$INSTDIR\VPNUK.exe$\"" /SC ONDEMAND /RL HIGHEST /F'
+    Pop $0
+    Pop $0
+!macroend
+!define customInstall
+
+; ─── customWelcomePage ──────────────────────────────────────────────────────────
 !include MUI2.nsh
 !macro customWelcomePage
 !insertMacro MUI_PAGE_WELCOME
 !macroEnd
 
-; ---------------------------------- COMMON -----------------------------------
+; ────────────────────────────────────────────────────────────────────────────────
+; COMMON
+; ────────────────────────────────────────────────────────────────────────────────
 !include nsDialogs.nsh
 !include WordFunc.nsh
 !include x64.nsh
@@ -43,24 +98,12 @@ send:
 
 !macro uninstallWg
     ; Step 1 — Stop AND delete every WireGuardTunnel service entry.
-    ;
-    ; Stopping a service alone is not enough: its registration stays in the
-    ; Windows Service Control Manager database.  wireguard.exe /uninstall
-    ; detects those orphaned entries and aborts silently rather than risk
-    ; removing a service that might still be in use.  We therefore call
-    ; sc.exe delete on each one after stopping it, so the SCM database is
-    ; clean before the main uninstaller runs.
     nsExec::ExecToStack 'powershell -NonInteractive -Command "$$svcs = Get-Service -Name WireGuardTunnel* -ErrorAction SilentlyContinue; foreach ($$s in $$svcs) { Stop-Service $$s -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; sc.exe delete $$s.Name | Out-Null }"'
     Pop $0
     Pop $0
     Sleep 2000
 
     ; Step 2 — Locate wireguard.exe from known install paths and call /uninstall.
-    ;
-    ; We use $1 (not $0) to keep the Pop register free for nsExec results.
-    ; Primary:  64-bit Program Files (covers the vast majority of installs).
-    ; Fallback: 32-bit Program Files.
-    ; Last resort: ask the registry for the installation directory.
     StrCpy $1 ""
     IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" 0 +2
     StrCpy $1 "$PROGRAMFILES64\WireGuard\wireguard.exe"
@@ -89,32 +132,9 @@ send:
 !macroend
 !define radioBtnClick "!insertmacro radioBtnClick"
 
-; ---------------------------------- INSTALL ----------------------------------
-; ------------- PSModule --------------
-!macro customInstall
-    nsExec::ExecToStack `powershell [Environment]::SetEnvironmentVariable(\"PSModulePath\", [Environment]::GetEnvironmentVariable(\"PSModulePath\", \"Machine\") + [System.IO.Path]::PathSeparator + \"$INSTDIR\PSModules\", \"Machine\")`
-    Pop $0
-    ${If} $0 != 0
-        Pop $0
-        MessageBox MB_OK "Error setting PSModulePath:$\n$0"
-    ${EndIf}
-
-    ; ─── Task Scheduler ──────────────────────────────────────────────────────
-    ; Register an on-demand scheduled task that runs VPNUK at the highest
-    ; available privilege level.  Desktop and Start Menu shortcuts are then
-    ; rewritten to target schtasks.exe (which is asInvoker and carries no UAC
-    ; shield) while keeping the VPNUK icon — so the shield never appears.
-    ; ─── Register ONDEMAND elevated task ─────────────────────────────────────
-    ; Shortcuts are created by customCreateDesktopIcon/customCreateStartMenuIcon.
-    nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
-    Pop $0
-    Pop $0
-    nsExec::ExecToStack 'schtasks /Create /TN "VPNUK" /TR "$\"$INSTDIR\VPNUK.exe$\"" /SC ONDEMAND /RL HIGHEST /F'
-    Pop $0
-    Pop $0
-!macroend
-
-; --------------- OVPN ----------------
+; ────────────────────────────────────────────────────────────────────────────────
+; INSTALL PAGES (OpenVPN + WireGuard)
+; ────────────────────────────────────────────────────────────────────────────────
 !macro customPageAfterChangeDir
     !pragma warning disable 6040 ; Disable 'LangString is not set in language table of language <lang>'
     LangString title 1033 "OpenVPN"
@@ -301,8 +321,6 @@ send:
         ${NSD_CreateLabel} 0u 0u 100% 12u "Select WireGuard to use:"
         Pop $wgHwnd
 
-        ; "Install WireGuard X" — only shown when the bundled version differs
-        ; from what is already installed (or nothing is installed yet).
         StrCmp $wgPath "" +2 0
         StrCmp $wgVersion $installedWgVer wg_install_end 0
         ${NSD_CreateRadioButton} 12u "$wgHeight\u" 100% 12u "Install WireGuard $wgVersion"
@@ -313,16 +331,12 @@ send:
         StrCpy $wgRadioValue "true"
     wg_install_end:
 
-        ; "Use Existing WireGuard" — shown whenever WireGuard is already present.
-        ; Label intentionally omits the version to avoid showing "unknown" when
-        ; the registry entry is missing.  This option is always pre-selected when
-        ; it is available — most users should keep their existing installation.
         StrCmp $wgPath "" wg_use_end 0
         ${NSD_CreateRadioButton} 12u "$wgHeight\u" 100% 12u "Use Existing WireGuard"
         Pop $wgHwnd
         nsDialogs::SetUserData $wgHwnd "false"
         ${NSD_OnClick} $wgHwnd wgRadioBtnClick
-        ${NSD_Check} $wgHwnd        ; pre-select this option — preferred default
+        ${NSD_Check} $wgHwnd
         StrCpy $wgRadioValue "false"
     wg_use_end:
 
@@ -376,7 +390,9 @@ send:
     !pragma warning enable 6040 ; Enable back
 !macroend
 
-; --------------------------------- UNINSTALL ---------------------------------
+; ────────────────────────────────────────────────────────────────────────────────
+; UNINSTALL
+; ────────────────────────────────────────────────────────────────────────────────
 !macro customUninstallPage
 
 ; ------------- PSModule --------------
@@ -439,7 +455,7 @@ Function un.PSModulePath
     Call un.StrRep
     pop $psmDir
 
-    nsExec::ExecToStack `powershell [Environment]::SetEnvironmentVariable(\"PSModulePath\", [Environment]::GetEnvironmentVariable(\"PSModulePath\", \"Machine\") -replace \"$([System.IO.Path]::PathSeparator)$psmDir\", \"Machine\")`
+    nsExec::ExecToStack `powershell [Environment]::SetEnvironmentVariable("PSModulePath", [Environment]::GetEnvironmentVariable("PSModulePath", "Machine") -replace "$([System.IO.Path]::PathSeparator)$psmDir", "Machine")`
     Pop $0
     ${If} $0 != 0
         Pop $0
@@ -563,21 +579,4 @@ FunctionEnd
         EnableWindow $0 1
     FunctionEnd
     !pragma warning enable 6040
-!macroend
-
-; ─── Shortcut hook overrides ───────────────────────────────────────────────────
-; electron-builder calls these macros instead of its default shortcut creation.
-; Pointing shortcuts at schtasks.exe avoids the UAC shield that appears when
-; the shortcut target directly carries requireAdministrator.
-; schtasks /Run targets the ONDEMAND task registered in customInstall, which
-; launches VPNUK.exe at HIGHEST privilege without showing a UAC prompt.
-
-!macro customCreateDesktopIcon
-    SetShellVarContext all
-    CreateShortCut "$DESKTOP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
-!macroend
-
-!macro customCreateStartMenuIcon
-    SetShellVarContext all
-    CreateShortCut "$SMPROGRAMS\$ICONS_GROUP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
 !macroend
