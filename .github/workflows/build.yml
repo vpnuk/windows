@@ -172,8 +172,44 @@ jobs:
           # installer when all three --prepackaged calls share the same output dir.
           # Simplest supported path: run all three arches in one call pointing at
           # the x64 dir; each arch slot will contain signed x64 content.
+          # Print electron-builder version so we know which NSIS template is in use
+          $ebVer = (Get-Content node_modules/electron-builder/package.json | ConvertFrom-Json).version
+          Write-Host "electron-builder version: $ebVer"
+
+          # Redirect temp so we can find the generated .nsi script before EB deletes it
+          $nsisCapture = "D:\nsis-capture"
+          New-Item -ItemType Directory -Path $nsisCapture -Force | Out-Null
+          $env:ELECTRON_BUILDER_CACHE = $nsisCapture
+          # Point TEMP/TMP so makensis temp files land in our capture dir
+          $origTemp = $env:TEMP
+          $env:TEMP = $nsisCapture
+          $env:TMP  = $nsisCapture
+
           yarn run electron-builder --win nsis     --x64 --ia32 --arm64 --prepackaged $preX64   --publish=never
           yarn run electron-builder --win nsis-web --x64             --prepackaged $preX64   --publish=never
+
+          $env:TEMP = $origTemp
+          $env:TMP  = $origTemp
+
+          # Dump any generated .nsi files — look for our custom macro references
+          Write-Host ""
+          Write-Host "=== Searching for generated .nsi files ==="
+          $searchDirs = @($nsisCapture, $origTemp, "D:\a", "$env:LOCALAPPDATA\Temp")
+          foreach ($dir in $searchDirs) {
+            if (Test-Path $dir) {
+              $nsiFiles = Get-ChildItem $dir -Filter "*.nsi" -Recurse -ErrorAction SilentlyContinue
+              foreach ($f in $nsiFiles) {
+                Write-Host "--- NSI: $($f.FullName) ---"
+                $lines = Get-Content $f.FullName
+                for ($i = 0; $i -lt $lines.Count; $i++) {
+                  $l = $lines[$i]
+                  if ($l -match "customCreateDesktopIcon|customInstall|extension\.nsh|!include|!ifdef.*custom|!insertmacro.*custom") {
+                    Write-Host "  L$($i+1): $l"
+                  }
+                }
+              }
+            }
+          }
 
       # ── Diagnostic: confirm VPNUK.exe is signed at each point ─────────────
       - name: Diagnose — signatures in win*-unpacked, nsis-web 7z, and full installer
