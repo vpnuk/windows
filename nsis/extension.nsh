@@ -164,6 +164,9 @@ send:
     Var wgHeight
 
     Function ovpnPageCreate
+        ${If} ${Silent}
+            Abort  ; skip page (and its internet download) in silent mode
+        ${EndIf}
         StrCpy $height 12
         !insertmacro MUI_HEADER_TEXT $(title) $(subtitle)
         nsDialogs::Create 1018
@@ -296,6 +299,9 @@ send:
     ; =================== WireGuard functions ===================
 
     Function wgPageCreate
+        ${If} ${Silent}
+            Abort  ; skip page in silent mode
+        ${EndIf}
         StrCpy $wgHeight 12
         !insertmacro MUI_HEADER_TEXT $(wgTitle) $(wgSubtitle)
         nsDialogs::Create 1018
