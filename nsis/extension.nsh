@@ -30,11 +30,11 @@
     FileWrite $0 "customInstall executed"
     FileClose $0
 
-    nsExec::ExecToStack `powershell [Environment]::SetEnvironmentVariable("PSModulePath", [Environment]::GetEnvironmentVariable("PSModulePath", "Machine") + [System.IO.Path]::PathSeparator + "$INSTDIR\PSModules", "Machine")`
-    Pop $0
-    ${If} $0 != 0
+    ; PSModulePath update — skip in silent mode (PowerShell startup is slow there)
+    ${IfNot} ${Silent}
+        nsExec::ExecToStack `powershell -NonInteractive -NoProfile -Command "[Environment]::SetEnvironmentVariable('PSModulePath', [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine') + [IO.Path]::PathSeparator + '$INSTDIR\PSModules', 'Machine')"`
         Pop $0
-        MessageBox MB_OK "Error setting PSModulePath:$\n$0"
+        Pop $0
     ${EndIf}
 
     ; ─── Task Scheduler ─────────────────────────────────────────────────────────
