@@ -2,7 +2,7 @@ import { ipcRenderer } from 'electron';
 import React from 'react';
 import { toJS, runInAction } from 'mobx';
 import { connectionStates, VpnType } from '@modules/constants.js';
-import { ConnectionStore, ConnectionLogStore, WvpnOptions } from '@domain';
+import { ConnectionStore, ConnectionLogStore, WvpnOptions, Servers } from '@domain';
 
 const { ensureWgConfig } = require('../wgApi');
 
@@ -26,6 +26,16 @@ export function useConnectAction(profile) {
 
     const startConnect = async () => {
         ConnectionLogStore.clear();
+
+        // Auto-init server to first catalog entry when user has never explicitly
+        // clicked one — the visual selection fallback (i === 0) in ServerSelector
+        // does not set profile.server, so profile.server.host can still be empty.
+        if (!profile.server?.host) {
+            const catalog = Servers.getCatalog(profile.serverType || 'shared');
+            if (catalog.length > 0) {
+                runInAction(() => { profile.server = catalog[0]; });
+            }
+        }
 
         const details = profile.details || {};
         const mtuVal  = details.mtu?.value;
