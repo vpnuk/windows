@@ -88,16 +88,11 @@ jobs:
           ESIGNER_TOTP_SECRET:   ${{ secrets.ESIGNER_TOTP_SECRET }}
         run: |
           $exes = Get-ChildItem .\release\*.exe
-          if (-not $exes) { Write-Warning "No .exe files found in .\release — skipping signing"; exit 0 }
+          if (-not $exes) { Write-Warning "No .exe files found in .\release"; exit 0 }
           foreach ($exe in $exes) {
             Write-Host "Signing: $($exe.Name)"
-            & cmd /c "`"$env:CST_BAT`" sign" `
-              "-username=$env:ESIGNER_USERNAME" `
-              "-password=$env:ESIGNER_PASSWORD" `
-              "-credential_id=$env:ESIGNER_CREDENTIAL_ID" `
-              "-totp_secret=$env:ESIGNER_TOTP_SECRET" `
-              "-input_file_path=`"$($exe.FullName)`"" `
-              "-override=true"
+            $cmd = "`"$env:CST_BAT`" sign -username=`"$env:ESIGNER_USERNAME`" -password=`"$env:ESIGNER_PASSWORD`" -credential_id=`"$env:ESIGNER_CREDENTIAL_ID`" -totp_secret=`"$env:ESIGNER_TOTP_SECRET`" -input_file_path=`"$($exe.FullName)`" -override=true"
+            cmd.exe /c $cmd
             if ($LASTEXITCODE -ne 0) { throw "Signing failed for $($exe.Name) (exit $LASTEXITCODE)" }
           }
           Write-Host "All installers signed successfully."
