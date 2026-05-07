@@ -259,6 +259,66 @@ jobs:
             Write-Host "No full installer found"
           }
 
+      - name: Verify installed VPNUK.exe signature (silent install test)
+        shell: pwsh
+        run: |
+          # Silently install the full NSIS installer — CI runner is already Administrator
+          $installer = Get-ChildItem .\release\*.exe | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
+          Write-Host "Silent-installing: $($installer.Name)"
+          $p = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait -PassThru
+          Write-Host "Installer exit code: $($p.ExitCode)"
+          Start-Sleep -Seconds 8  # allow post-install steps to finish
+
+          # Check all likely install locations
+          $candidates = @(
+            "C:\Program Files\VPNUK\VPNUK.exe",
+            "C:\Program Files (x86)\VPNUK\VPNUK.exe",
+            "$env:LOCALAPPDATA\Programs\VPNUK\VPNUK.exe",
+            "$env:APPDATA\VPNUK\VPNUK.exe"
+          )
+          $found = $false
+          foreach ($p in $candidates) {
+            if (Test-Path $p) {
+              $found = $true
+              $sig = Get-AuthenticodeSignature $p
+              Write-Host "INSTALLED EXE: $p"
+              Write-Host "  size=$((Get-Item $p).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
+            }
+          }
+          if (-not $found) {
+            Write-Host "Could not find VPNUK.exe in any expected location. Searching..."
+            Get-ChildItem "C:\Program Files" -Filter "VPNUK.exe" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+              $sig = Get-AuthenticodeSignature $_.FullName
+              Write-Host "FOUND: $($_.FullName)  size=$($_.Length)  status=$($sig.Status)"
+            }
+            Get-ChildItem "C:\Program Files (x86)" -Filter "VPNUK.exe" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+              $sig = Get-AuthenticodeSignature $_.FullName
+              Write-Host "FOUND: $($_.FullName)  size=$($_.Length)  status=$($sig.Status)"
+            }
+          }
+
+          # Show the schtasks task that was created
+          Write-Host ""
+          Write-Host "=== schtasks VPNUK task ==="
+          schtasks /Query /TN "VPNUK" /FO LIST 2>&1 | ForEach-Object { Write-Host $_ }
+
+          # Show desktop shortcut target
+          Write-Host ""
+          Write-Host "=== Desktop shortcut ==="
+          $lnks = @(
+            "$env:PUBLIC\Desktop\VPNUK.lnk",
+            "$env:USERPROFILE\Desktop\VPNUK.lnk"
+          )
+          foreach ($lnk in $lnks) {
+            if (Test-Path $lnk) {
+              $sh = New-Object -COM WScript.Shell
+              $sc = $sh.CreateShortcut($lnk)
+              Write-Host "Shortcut: $lnk"
+              Write-Host "  Target: $($sc.TargetPath)"
+              Write-Host "  Args:   $($sc.Arguments)"
+            }
+          }
+
       - name: Sign installer wrappers with eSigner
         shell: pwsh
         env:
