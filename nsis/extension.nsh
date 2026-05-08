@@ -466,21 +466,33 @@ Function un.StrRep
     Exch $R1
 FunctionEnd
 
+; un.PSModulePath — remove our PSModules dir from the machine-wide PSModulePath.
+; Uses a temp .ps1 file to avoid NSIS mangling the PowerShell quoting on the
+; command line (the old one-liner caused "Missing ')' in method call" errors).
 Var psmDir
 
 Function un.PSModulePath
-    Push "$INSTDIR\PSModules"
-    Push "\"
-    Push "\\"
-    Call un.StrRep
-    pop $psmDir
+    ; Build the directory string with forward-slash normalisation (not needed
+    ; here, but kept so un.StrRep call is still useful if reused elsewhere).
+    StrCpy $psmDir "$INSTDIR\PSModules"
 
-    nsExec::ExecToStack `powershell [Environment]::SetEnvironmentVariable("PSModulePath", [Environment]::GetEnvironmentVariable("PSModulePath", "Machine") -replace "$([System.IO.Path]::PathSeparator)$psmDir", "Machine")`
+    FileOpen $R9 "$TEMP\vpnuk_rm_psmod.ps1" w
+    FileWrite $R9 "$$modPath = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')$\r$\n"
+    FileWrite $R9 "$$sep     = [IO.Path]::PathSeparator$\r$\n"
+    FileWrite $R9 "$$remove  = '$psmDir'$\r$\n"
+    FileWrite $R9 "$$newPath = ($modPath -split [regex]::Escape($$sep) | Where-Object { $$_ -ne $$remove }) -join $$sep$\r$\n"
+    FileWrite $R9 "[Environment]::SetEnvironmentVariable('PSModulePath', $$newPath, 'Machine')$\r$\n"
+    FileClose $R9
+
+    nsExec::ExecToStack 'powershell -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "$TEMP\vpnuk_rm_psmod.ps1"'
     Pop $0
     ${If} $0 != 0
         Pop $0
         MessageBox MB_OK "Error setting PSModulePath:$\n$0"
+    ${Else}
+        Pop $0
     ${EndIf}
+    Delete "$TEMP\vpnuk_rm_psmod.ps1"
 FunctionEnd
 
 ; -------------- Extras ---------------
