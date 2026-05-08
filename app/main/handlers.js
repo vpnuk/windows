@@ -34,6 +34,7 @@ const { downloadWireGuardInstaller } = require('../modules/catalogs');
 const isDev = process.env.ELECTRON_ENV === 'Dev';
 
 let vpnConnection = null;
+let _connectId = 0;
 
 // ─── Kill-switch crash-recovery state file ────────────────────────────────────
 // Written to disk whenever the kill switch is active so that if the app is
@@ -139,6 +140,7 @@ ipcMain.on('connection-start', async (event, args) => {
 
     vpnConnection = createVpn(profile, {
         connectedHook: async () => {
+            const thisId = ++_connectId;
             appendToLog(pid, `Hook: connected to ${profile.server?.label}`);
             if (profile.killSwitchEnabled) {
                 // Remove the ISP default route — all traffic must now flow through
@@ -163,7 +165,9 @@ ipcMain.on('connection-start', async (event, args) => {
             // too early returns the ISP address instead of the VPN exit IP.
             // Wait 3 s for routing to stabilise, then do the lookup through the tunnel.
             await new Promise(r => setTimeout(r, 3000));
+            if (_connectId !== thisId) return; // disconnected during the wait — abort
             const ip = await publicIp.v4({ timeout: 10000 }).catch(() => null);
+            if (_connectId !== thisId) return; // disconnected during IP lookup — abort
             appendToLog(pid, `Public IP after connect: ${ip || '(lookup failed)'}`);
             if (ip) {
                 tray.setConnectedState(`Connected to ${profile.server.label}\nYour IP: ${ip}`);
@@ -174,13 +178,25 @@ ipcMain.on('connection-start', async (event, args) => {
         // intentional = true  → user clicked Disconnect (restore internet)
         // intentional = false → tunnel dropped unexpectedly (keep internet blocked)
         disconnectedHook: (intentional = true) => {
+            _connectId++; // cancel any in-flight connectedHook IP lookup
             appendToLog(pid, `Hook: disconnected (intentional=${intentional})`);
             try {
                 event.sender.send('connection-changed', connectionStates.disconnected);
             } catch (error) {
                 if (error.message !== 'Object has been destroyed') throw error;
             }
-            tray.setDisconnectedState('Disconnected');
+            // Update tray icon immediately (silent — the balloon below replaces it).
+            tray.setStateSilent(connectionStates.disconnected, 'Disconnected');
+            // Fetch ISP IP (routing restores quickly) then show one clean balloon.
+            publicIp.v4({ timeout: 6000 }).catch(() => null).then(ip => {
+                const content = ip
+                    ? `Protection disabled. IP: ${ip}`
+                    : 'Protection disabled';
+                tray.notify('VPNUK Disconnected', content, connectionStates.disconnected);
+                if (ip) tray.setStateSilent(
+                    connectionStates.disconnected, `Disconnected\nYour IP: ${ip}`
+                );
+            });
 
             if (profile.killSwitchEnabled) {
                 if (intentional) {
