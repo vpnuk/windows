@@ -44,30 +44,46 @@ class AppTray {
 
     setDisconnectedState = message =>
         this.#setTrayState(connectionStates.disconnected, message);
-    
+
     setConnectingState = message =>
         this.#setTrayState(connectionStates.connecting, message);
 
+    // Update icon/tooltip/menu without showing a balloon notification.
+    setStateSilent = (state, message) =>
+        this.#updateState(state, message);
+
+    // Show a balloon notification without changing the tray icon or tooltip.
+    notify = (title, content, state = connectionStates.disconnected) => {
+        this.#tray.displayBalloon({
+            iconType: 'custom',
+            icon: iconPaths[state],
+            title,
+            content
+        });
+    };
+
     #tray = null;
 
-    #setTrayState = (state, message) => {
+    #updateState = (state, message) => {
         const text = `${tooltipBase}: ${message}`;
         this.#tray.setImage(icons[state]);
         this.#tray.setToolTip(text);
-
         contextMenuTemplate
             .find(item => item.id === 'status')
             .label = `Status: ${message}`;
         this.#tray.setContextMenu(
             Menu.buildFromTemplate(contextMenuTemplate));
+    };
 
+    #setTrayState = (state, message) => {
+        this.#updateState(state, message);
         this.#tray.displayBalloon({
             iconType: 'custom',
             icon: iconPaths[state],
-            title: text,
+            title: `${tooltipBase}: ${message}`,
             content: message
         });
-    }
+    };
 }
 
 module.exports = AppTray;
