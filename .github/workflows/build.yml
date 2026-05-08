@@ -365,6 +365,13 @@ jobs:
           Write-Host "=== schtasks VPNUK task ==="
           schtasks /Query /TN "VPNUK" /FO LIST 2>&1 | ForEach-Object { Write-Host $_ }
 
+          # Print schtasks task-creation log (written by customInstall Register-ScheduledTask)
+          Write-Host ""
+          Write-Host "=== schtasks_exit.txt ==="
+          $taskLog = "C:\Program Files\VPNUK\schtasks_exit.txt"
+          if (Test-Path $taskLog) { Write-Host (Get-Content $taskLog) }
+          else { Write-Host "(schtasks_exit.txt not found — Register-ScheduledTask not yet run?)" }
+
           # Check extension.nsh load probe
           Write-Host ""
           Write-Host "=== extension.nsh load probe ==="
