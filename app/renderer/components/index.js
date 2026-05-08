@@ -15,6 +15,7 @@ export { default as OvpnDetails } from './OvpnDetails';
 export { default as ProfileDetails } from './ProfileDetails';
 export { default as ServerSelector } from './ServerSelector';
 export { default as Sidebar } from './Sidebar';
+export { default as ForceUpdateScreen } from './ForceUpdateScreen';
 export { default as Starting } from './Starting';
 export { default as UpdateInfo } from './UpdateInfo';
 export { default as WireGuardDetails } from './WireGuardDetails';

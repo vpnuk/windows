@@ -5,7 +5,7 @@ import { observer } from 'mobx-react-lite';
 import { Layout } from 'antd';
 import './app.css';
 import { modalStyle } from '@styles';
-import { Sidebar, MainPage, UpdateInfo, Starting } from '@components';
+import { Sidebar, MainPage, UpdateInfo, Starting, ForceUpdateScreen } from '@components';
 import {
     checkOvpnUpdates,
     downloadOvpnUpdate,
@@ -61,6 +61,7 @@ function acCancelRetry() {
 
 const App = observer(() => {
     const [ready, setReady] = useState(false);
+    const [forceUpdateInfo, setForceUpdateInfo] = useState(null);
     const [startError, setStartError] = useState(null); // null | 'warning' | 'error'
     const [startMessage, setStartMessage] = useState('Starting...');
     const [notification, setNotification] = useState(null);
@@ -70,7 +71,14 @@ const App = observer(() => {
 
     useEffect(() => {
         initializeCatalogs()
-            .then(catalog => {
+            .then(async catalog => {
+                if (catalog.forceUpdate?.minVersion) {
+                    const appVer = await ipcRenderer.invoke('get-version');
+                    if (semverBelow(appVer, catalog.forceUpdate.minVersion)) {
+                        setForceUpdateInfo(catalog.forceUpdate);
+                        return;
+                    }
+                }
                 isDev && console.log('initializeCatalogs', catalog);
                 ipcRenderer.send('ikev2-cert-install', catalog.installIKEv2Cert);
                 runInAction(() => {
@@ -219,6 +227,18 @@ const App = observer(() => {
         </div>
     );
 });
+
+function semverBelow(version, minVersion) {
+    const v = String(version).split('.').map(Number);
+    const m = String(minVersion).split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+        const vi = v[i] || 0;
+        const mi = m[i] || 0;
+        if (vi < mi) return true;
+        if (vi > mi) return false;
+    }
+    return false;
+}
 
 function ovpnCheckUpdate() {
     checkOvpnUpdates().then(info => {

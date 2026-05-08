@@ -124,7 +124,7 @@ function initializeCatalogs() {
         fs.mkdirSync(settingsPath.folder);
     };
     const oldVers = getVersions(settingsPath.versions);
-    let ipseckey, ikev2Cert, wgInstaller;
+    let ipseckey, ikev2Cert, wgInstaller, forceUpdate;
 
     return axios.get(settingsLink.versions, { timeout: 8000 })
         .then(response => response.data)
@@ -172,6 +172,7 @@ function initializeCatalogs() {
                 fs.writeFileSync(settingsPath.versions, JSON.stringify(newVers, undefined, 2));
             }
             ipseckey = newVers.ipseckey ? newVers.ipseckey : oldVers?.ipseckey;
+            forceUpdate = newVers.forceUpdate || null;
             return Promise.all(downloads);
         })
         .then(() => {
@@ -193,6 +194,7 @@ function initializeCatalogs() {
             ipseckey: ipseckey,
             installIKEv2Cert: ikev2Cert,
             wgInstaller: wgInstaller,
+            forceUpdate: forceUpdate,
             offlineMode: false
         }));
 };

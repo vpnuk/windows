@@ -9,6 +9,7 @@ let _downloading = false; // true only while a download is in progress
 const enableAutoUpdate = sender => {
     _sender = sender;
     autoUpdater.autoDownload = false;
+    autoUpdater.allowPrerelease = true;
     autoUpdater.checkForUpdates().catch(err => {
         isDev && console.log('Update check failed (offline?):', err.message);
     });
