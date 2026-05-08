@@ -4,12 +4,12 @@ const path = require('path');
 
 const isDev = process.env.ELECTRON_ENV === 'Dev';
 let _sender;
+let _downloading = false; // true only while a download is in progress
 
 const enableAutoUpdate = sender => {
     _sender = sender;
     autoUpdater.autoDownload = false;
     autoUpdater.checkForUpdates().catch(err => {
-        // Silently ignore update check failures — no internet is fine
         isDev && console.log('Update check failed (offline?):', err.message);
     });
 };
@@ -39,7 +39,9 @@ autoUpdater.on('update-available', info => {
         defaultId: 0
     }) !== 1) {
         _sender?.send('auto-update-info', info);
+        _downloading = true;
         autoUpdater.downloadUpdate().catch(err => {
+            _downloading = false;
             isDev && console.error('Download failed:', err);
             notify({
                 type: 'error',
@@ -60,6 +62,7 @@ autoUpdater.on('download-progress', progressObj => {
 });
 
 autoUpdater.on('update-downloaded', () => {
+    _downloading = false;
     _sender?.send('auto-update-progress', { percent: 100 });
     isDev && console.log('Update downloaded. Restarting to install.');
 
@@ -77,13 +80,14 @@ autoUpdater.on('update-downloaded', () => {
 
 autoUpdater.on('error', err => {
     isDev && console.log('Auto-updater error:', err.message);
-    // Silently swallow update errors — don't alarm the user if update check fails
-    // Only notify if it's during an active download (user already clicked Update)
-    if (_sender && err.message && !err.message.includes('net::ERR_')) {
+    // Only alert the user if they actively triggered a download — never on
+    // the background update check (which fails on test/private builds).
+    if (_downloading) {
+        _downloading = false;
         notify({
             type: 'warning',
-            title: 'Update Check Issue',
-            message: 'Could not check for updates right now. Try again later.'
+            title: 'Update Failed',
+            message: 'Could not complete the update. Please try again later.'
         });
     }
 });
