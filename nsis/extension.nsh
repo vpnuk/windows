@@ -1,45 +1,28 @@
 
-; ─── LOAD PROBE ─────────────────────────────────────────────────────────────────
-; The NSIS template calls !insertmacro customHeader unconditionally (installer.nsi L39).
-; If this file is correctly included, customHeader runs and writes a probe file.
-; CI checks for the probe file to confirm extension.nsh was actually loaded.
-!macro customHeader
-    FileOpen $R9 "$TEMP\extension_nsh_loaded.txt" w
-    FileWrite $R9 "extension.nsh loaded OK"
-    FileClose $R9
-!macroend
-
-
-; ─── CRITICAL: !define required so electron-builder's !ifdef checks fire ───────
-; NSIS !macro NAME alone does NOT satisfy !ifdef NAME in NSIS 3.x.
-
-; ─── Shortcut hook overrides ────────────────────────────────────────────────────
-; Shortcuts point to schtasks.exe (asInvoker — no UAC shield) which then
-; triggers the ONDEMAND task (registered in customInstall) at HIGHEST privilege.
-; VPNUK.exe is used only as the icon source.
-
-!macro customCreateDesktopIcon
-    ; Write probe so CI can confirm this macro ran
-    FileOpen $0 "$INSTDIR\customCreateDesktopIcon_ran.txt" w
-    FileWrite $0 "customCreateDesktopIcon executed"
-    FileClose $0
-    SetShellVarContext all
-    CreateShortCut "$DESKTOP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
-!macroend
-!define customCreateDesktopIcon
-
-!macro customCreateStartMenuIcon
-    SetShellVarContext all
-    CreateShortCut "$SMPROGRAMS\$ICONS_GROUP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
-!macroend
-!define customCreateStartMenuIcon
+; ─────────────────────────────────────────────────────────────────────────────────
+; extension.nsh — VPNUK custom NSIS hooks
+;
+; electron-builder v22.x template uses !ifmacrodef to check for custom macros.
+; Only !macro definitions matter (not !define) for those checks.
+;
+; Template macro call sites confirmed from installSection.nsh analysis:
+;   installSection.nsh  L78: !ifmacrodef customInstall  → !insertmacro customInstall
+;   installer.nsi       L39: !insertmacro customHeader  (unconditional — must be defined)
+;   installer.nsi       L68: !insertmacro customInit    (unconditional — must be defined)
+;
+; NOTE: customCreateDesktopIcon is NOT in any EB v22.x template. Shortcuts are
+; created by EB's own code.  We fix them in customInstall and on app first launch.
+; ─────────────────────────────────────────────────────────────────────────────────
 
 ; ─── customInstall ──────────────────────────────────────────────────────────────
+; Called after file extraction by installSection.nsh.
+; Creates the scheduled task and fixes both shortcuts to target schtasks.exe
+; (so the UAC shield does not appear on the desktop icon).
 !macro customInstall
     ; Write probe so CI can confirm this macro ran
-    FileOpen $0 "$INSTDIR\customInstall_ran.txt" w
-    FileWrite $0 "customInstall executed"
-    FileClose $0
+    FileOpen $R9 "$INSTDIR\customInstall_ran.txt" w
+    FileWrite $R9 "customInstall executed"
+    FileClose $R9
 
     ; PSModulePath update — skip in silent mode (PowerShell startup is slow there)
     ${IfNot} ${Silent}
@@ -49,17 +32,27 @@
     ${EndIf}
 
     ; ─── Task Scheduler ─────────────────────────────────────────────────────────
-    ; Register an on-demand scheduled task that runs VPNUK at the highest
-    ; available privilege level.  Desktop and Start Menu shortcuts target
-    ; schtasks.exe (asInvoker, no UAC shield).
+    ; On-demand task at HIGHEST privilege.  Shortcuts target schtasks.exe /Run
+    ; so launching the app does not trigger a UAC elevation prompt or UAC shield.
     nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
     Pop $0
     Pop $0
     nsExec::ExecToStack 'schtasks /Create /TN "VPNUK" /TR "$\"$INSTDIR\VPNUK.exe$\"" /SC ONDEMAND /RL HIGHEST /F'
     Pop $0
     Pop $0
+
+    ; ─── Shortcuts → schtasks.exe ────────────────────────────────────────────────
+    ; electron-builder creates shortcuts pointing to VPNUK.exe (which shows the UAC
+    ; shield because VPNUK.exe has a requireAdministrator manifest).  We delete and
+    ; recreate them here so they target schtasks.exe /Run /TN VPNUK instead.
+    ; The app also self-heals these shortcuts on first launch (main.js) in case
+    ; electron-builder's shortcut creation runs after this macro.
+    SetShellVarContext all
+    Delete "$DESKTOP\VPNUK.lnk"
+    CreateShortCut "$DESKTOP\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
+    Delete "$SMPROGRAMS\VPNUK\VPNUK.lnk"
+    CreateShortCut "$SMPROGRAMS\VPNUK\VPNUK.lnk" "$WINDIR\System32\schtasks.exe" '/Run /TN "VPNUK"' "$INSTDIR\VPNUK.exe" 0
 !macroend
-!define customInstall
 
 ; ─── customWelcomePage ──────────────────────────────────────────────────────────
 !include MUI2.nsh
