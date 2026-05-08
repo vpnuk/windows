@@ -378,7 +378,7 @@ ipcMain.on('auto-run-toggle', (_, enable) => {
         const psLines = [
             `$action    = New-ScheduledTaskAction -Execute '${exePath}'`,
             `$trigger   = New-ScheduledTaskTrigger -AtLogon`,
-            `$principal = New-ScheduledTaskPrincipal -GroupId 'BUILTIN\\Administrators' -RunLevel Highest`,
+            `$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\\$env:USERNAME" -LogonType Interactive -RunLevel Highest`,
             `$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan)`,
             `Register-ScheduledTask -TaskName 'VPNUK-Startup' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null`,
         ].join('\r\n');
