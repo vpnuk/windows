@@ -100,6 +100,38 @@ if (gotTheLock) {
     })
 
     app.on('ready', () => {
+        // ── Shortcut self-heal ────────────────────────────────────────────────
+        // Ensure the desktop shortcut points to schtasks.exe (not VPNUK.exe directly).
+        // VPNUK.exe has a requireAdministrator manifest so linking directly shows
+        // a UAC shield.  The installer's customInstall macro should have fixed this
+        // already, but we also fix it here in case the installer created the shortcuts
+        // after the macro ran.  VPNUK.exe runs elevated so it can update the shortcut.
+        try {
+            const cp = require('child_process');
+            const schtasksTarget = 'C:\\Windows\\System32\\schtasks.exe';
+            const exePath = process.execPath.replace(/\\/g, '\\\\');
+            const publicDesktop = (process.env.PUBLIC || 'C:\\Users\\Public') + '\\Desktop';
+            const shortcutPath = publicDesktop + '\\VPNUK.lnk';
+            // PowerShell one-liner: recreate shortcut only if it targets the wrong exe
+            const psCmd = [
+                `$sh = New-Object -ComObject WScript.Shell`,
+                `$lnk = '${shortcutPath.replace(/'/g, "\'")}'`,
+                `if (Test-Path $lnk) {`,
+                `  $sc = $sh.CreateShortcut($lnk)`,
+                `  if ($sc.TargetPath -ne '${schtasksTarget}') {`,
+                `    $sc.TargetPath = '${schtasksTarget}'`,
+                `    $sc.Arguments = '/Run /TN ""VPNUK""'`,
+                `    $sc.IconLocation = '${exePath},0'`,
+                `    $sc.Save()`,
+                `  }`,
+                `}`,
+            ].join('; ');
+            cp.exec(
+                `powershell -NonInteractive -NoProfile -WindowStyle Hidden -Command "${psCmd}"`,
+                { timeout: 15000 }
+            );
+        } catch { /* best-effort — never crash the app */ }
+
         // ── Kill-switch crash recovery ────────────────────────────────────────
         // If the app was killed or crashed while the kill switch was active the
         // default route was left deleted and the user has no internet access.
