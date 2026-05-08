@@ -42,7 +42,7 @@
     ; so Windows does not show the UAC shield on the desktop icon.
     FileOpen $R9 "$TEMP\vpnuk_task.ps1" w
     FileWrite $R9 "$$action    = New-ScheduledTaskAction -Execute '$INSTDIR\VPNUK.exe'$\r$\n"
-    FileWrite $R9 "$$principal = New-ScheduledTaskPrincipal -GroupId 'BUILTIN\Administrators' -RunLevel Highest$\r$\n"
+    FileWrite $R9 "$$principal = New-ScheduledTaskPrincipal -UserId $\"$$env:USERDOMAIN\$$env:USERNAME$\" -LogonType Interactive -RunLevel Highest$\r$\n"
     FileWrite $R9 "$$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries$\r$\n"
     FileWrite $R9 "Register-ScheduledTask -TaskName 'VPNUK' -Action $$action -Principal $$principal -Settings $$settings -Force | Out-Null$\r$\n"
     FileClose $R9
