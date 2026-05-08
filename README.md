@@ -3,7 +3,7 @@
 ### What's New
 
 #### WireGuard VPN Support
-VPNUK now supports the WireGuard protocol — a modern, high-performance VPN protocol that is significantly faster than OpenVPN and IPSec. WireGuard provides:
+VPNUK apps now supports the WireGuard protocol for all account types. WireGaurd is a modern, high-performance VPN protocol that is significantly faster than OpenVPN and IPSec. WireGuard provides:
 - Faster connection times
 - Better performance and lower latency
 - Improved battery efficiency
@@ -28,5 +28,7 @@ The app now checks for mandatory updates on startup. If a critical update is ava
 
 ---
 For support visit [vpnuk.net](https://vpnuk.net) or email service@vpnuk.net
+
+"WireGuard" and the "WireGuard" logo are registered trademarks of Jason A. Donenfeld.
 
 <!-- ci-trigger: 2026-05-07T11:54:14Z -->
