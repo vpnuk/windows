@@ -100,30 +100,39 @@ if (gotTheLock) {
     })
 
     app.on('ready', () => {
-        // ── Shortcut self-heal ────────────────────────────────────────────────
+        // ── Install self-heal ─────────────────────────────────────────────────
         // Ensure the desktop shortcut points to schtasks.exe (not VPNUK.exe directly).
-        // VPNUK.exe has a requireAdministrator manifest so linking directly shows
-        // a UAC shield.  The installer's customInstall macro should have fixed this
-        // already, but we also fix it here in case the installer created the shortcuts
-        // after the macro ran.  VPNUK.exe runs elevated so it can update the shortcut.
+        // VPNUK.exe has a requireAdministrator manifest so linking directly shows a UAC
+        // shield.  The installer's customInstall macro should have already fixed this,
+        // but we also self-heal here in case the installer's shortcut creation ran
+        // AFTER customInstall (electron-builder's order is not guaranteed).
+        //
+        // Also ensure the VPNUK scheduled task exists so the shortcut actually works.
+        // VPNUK.exe runs as Administrator (requireAdministrator manifest) so it can
+        // create scheduled tasks and modify the All Users desktop shortcut.
         try {
             const cp = require('child_process');
-            const schtasksTarget = 'C:\\Windows\\System32\\schtasks.exe';
             const exePath = process.execPath.replace(/\\/g, '\\\\');
             const publicDesktop = (process.env.PUBLIC || 'C:\\Users\\Public') + '\\Desktop';
             const shortcutPath = publicDesktop + '\\VPNUK.lnk';
-            // PowerShell one-liner: recreate shortcut only if it targets the wrong exe
+            // PowerShell script: (1) recreate shortcut if wrong; (2) create schtasks task if missing
             const psCmd = [
+                // --- Shortcut fix ---
                 `$sh = New-Object -ComObject WScript.Shell`,
                 `$lnk = '${shortcutPath.replace(/'/g, "\'")}'`,
                 `if (Test-Path $lnk) {`,
                 `  $sc = $sh.CreateShortcut($lnk)`,
-                `  if ($sc.TargetPath -ne '${schtasksTarget}') {`,
-                `    $sc.TargetPath = '${schtasksTarget}'`,
+                `  if ($sc.TargetPath -ne 'C:\\Windows\\System32\\schtasks.exe') {`,
+                `    $sc.TargetPath = 'C:\\Windows\\System32\\schtasks.exe'`,
                 `    $sc.Arguments = '/Run /TN ""VPNUK""'`,
                 `    $sc.IconLocation = '${exePath},0'`,
                 `    $sc.Save()`,
                 `  }`,
+                `}`,
+                // --- Scheduled task fix ---
+                `$q = schtasks /Query /TN VPNUK 2>&1`,
+                `if ($LASTEXITCODE -ne 0) {`,
+                `  schtasks /Create /TN VPNUK /TR '\"${exePath}\"' /SC ONDEMAND /RL HIGHEST /F | Out-Null`,
                 `}`,
             ].join('; ');
             cp.exec(
