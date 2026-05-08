@@ -37,7 +37,10 @@
     nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
     Pop $0
     Pop $0
-    nsExec::ExecToStack 'schtasks /Create /TN "VPNUK" /TR "$\"$INSTDIR\VPNUK.exe$\"" /SC ONDEMAND /RL HIGHEST /F'
+    ; /TR must be single-quoted with the literal " chars from this string.
+    ; $"...$" would produce ""path"" (double-double-quotes) which CommandLineToArgvW
+    ; parses as an empty TR argument.  "path" (one pair) is the correct form.
+    nsExec::ExecToStack 'schtasks /Create /TN "VPNUK" /TR "$INSTDIR\VPNUK.exe" /SC ONDEMAND /RL HIGHEST /F'
     Pop $0
     Pop $0
 
