@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Modal from 'react-modal';
-import { runInAction } from 'mobx';
+import { runInAction, toJS } from 'mobx';
 import { observer } from 'mobx-react-lite';
 import { Layout } from 'antd';
 import './app.css';
@@ -24,6 +24,7 @@ import {
 } from '@domain';
 import scheduler, { HOUR_MS } from '@modules/scheduler.js';
 const { ipcRenderer } = require('electron');
+const { ensureWgConfig } = require('./components/wgApi');
 
 let isDev, store;
 
@@ -254,11 +255,35 @@ ipcRenderer.on('default-gateway-response', (_, arg) => {
                 }
             }
             if (profile?.server?.host) {
-                ipcRenderer.send('connection-start', {
-                    profile,
-                    gateway: arg,
-                    wVpnOptions: { ipseckey: WvpnOptions.ipseckey }
-                });
+                // Snapshot MobX observables to plain objects before sending over IPC
+                // (mirrors useConnectAction which uses toJS throughout).
+                const plainProfile = toJS(profile);
+                const plainWvpn    = toJS(WvpnOptions);
+
+                const doAutoConnect = async () => {
+                    // WireGuard requires a fresh config from the API before connecting.
+                    // useConnectAction calls ensureWgConfig for this — we must do the same,
+                    // otherwise connection-start fires with no .conf file and fails silently.
+                    if (plainProfile.vpnType === 'WireGuard') {
+                        const result = await ensureWgConfig(plainProfile, () => {}).catch(err => ({
+                            success: false, error: err.message
+                        }));
+                        if (!result.success) {
+                            isDev && console.error('auto-connect WG config failed:', result.error);
+                            return;
+                        }
+                        // Mirror the wgConfigFetched toggle so WireGuardDetails re-renders
+                        runInAction(() => { profile.wgConfigFetched = !profile.wgConfigFetched; });
+                    }
+
+                    ipcRenderer.send('connection-start', {
+                        profile:     plainProfile,
+                        gateway:     arg,
+                        wVpnOptions: plainWvpn,
+                    });
+                };
+
+                doAutoConnect();
             }
         } else {
             // No gateway yet — show the waiting modal and schedule a retry
