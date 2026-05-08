@@ -79,7 +79,6 @@ jobs:
         env:
           GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          DEBUG:                       "electron-builder"
         run: yarn run electron-builder --win dir --x64 --ia32 --arm64 --publish=never
 
       # ── Phase 2: sign VPNUK.exe in every unpacked arch dir ────────────────
@@ -155,7 +154,6 @@ jobs:
         env:
           GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          DEBUG:                       "electron-builder"
         shell: pwsh
         run: |
           # For the full installer we pass all three arches so the installer is
