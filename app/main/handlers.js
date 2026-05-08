@@ -364,12 +364,32 @@ ipcMain.on('wg-update-request', async (event, arg) => {
 
 ipcMain.on('auto-run-toggle', (_, enable) => {
     isDev && console.log('auto-run-toggle', enable);
-    const cp = require('child_process');
-    const exePath = app.getPath('exe');
+    const cp  = require('child_process');
+    const fs  = require('fs');
+    const os  = require('os');
+    const path = require('path');
+
     if (enable) {
+        // Use PowerShell Register-ScheduledTask via a temp .ps1 file to avoid
+        // quoting issues with schtasks CLI.  Mirrors the installer's customInstall
+        // approach so auto-start uses the same Administrators/Highest privilege model
+        // as the desktop shortcut — no UAC prompt at login.
+        const exePath = app.getPath('exe').replace(/'/g, "''"); // escape PS single-quotes
+        const psLines = [
+            `$action    = New-ScheduledTaskAction -Execute '${exePath}'`,
+            `$trigger   = New-ScheduledTaskTrigger -AtLogon`,
+            `$principal = New-ScheduledTaskPrincipal -GroupId 'BUILTIN\\Administrators' -RunLevel Highest`,
+            `$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan)`,
+            `Register-ScheduledTask -TaskName 'VPNUK-Startup' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null`,
+        ].join('\r\n');
+        const tmp = path.join(os.tmpdir(), 'vpnuk_startup.ps1');
+        try { fs.writeFileSync(tmp, psLines, 'utf8'); } catch (_) {}
         cp.exec(
-            `schtasks /Create /TN "VPNUK-Startup" /TR "\"${exePath}\"" /SC ONLOGON /RL HIGHEST /DELAY 0001:00 /F`,
-            err => { isDev && err && console.error('auto-run enable:', err.message); }
+            `powershell -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "${tmp}"`,
+            err => {
+                try { fs.unlinkSync(tmp); } catch (_) {}
+                isDev && err && console.error('auto-run enable:', err.message);
+            }
         );
     } else {
         cp.exec('schtasks /Delete /TN "VPNUK-Startup" /F', () => {});
