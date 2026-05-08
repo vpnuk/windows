@@ -480,7 +480,7 @@ Function un.PSModulePath
     FileWrite $R9 "$$modPath = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')$\r$\n"
     FileWrite $R9 "$$sep     = [IO.Path]::PathSeparator$\r$\n"
     FileWrite $R9 "$$remove  = '$psmDir'$\r$\n"
-    FileWrite $R9 "$$newPath = ($modPath -split [regex]::Escape($$sep) | Where-Object { $$_ -ne $$remove }) -join $$sep$\r$\n"
+    FileWrite $R9 "$$newPath = ($$modPath -split [regex]::Escape($$sep) | Where-Object { $$_ -ne $$remove }) -join $$sep$\r$\n"
     FileWrite $R9 "[Environment]::SetEnvironmentVariable('PSModulePath', $$newPath, 'Machine')$\r$\n"
     FileClose $R9
 
@@ -601,6 +601,9 @@ FunctionEnd
 
         ; ─── Task Scheduler cleanup ─────────────────────────────────────
         nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
+        Pop $0
+        Pop $0
+        nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK-Startup" /F'
         Pop $0
         Pop $0
 
