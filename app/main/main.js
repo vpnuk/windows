@@ -95,6 +95,7 @@ if (gotTheLock) {
     app.on('second-instance', (event, commandLine, workingDirectory) => {
         if (window) {
             if (window.isMinimized()) window.restore()
+            window.show()
             window.focus()
         }
     })
@@ -143,7 +144,7 @@ if (gotTheLock) {
         } catch { /* best-effort */ }
 
         createWindow();
-        tray = new AppTray(() => window.focus());
+        tray = new AppTray(() => { window.show(); window.focus(); });
         exports.tray = tray;
     });
 
