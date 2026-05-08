@@ -70,338 +70,71 @@ jobs:
           echo "CST_BAT=$bat" >> $env:GITHUB_ENV
           echo "CST_DIR=$dir" >> $env:GITHUB_ENV
 
-      # ── Phase 1: unpack all arches (no NSIS installer yet) ────────────────
-      # Pass arches explicitly — --win dir alone only builds the default arch.
-      # The NSIS assembler re-stamps VPNUK.exe after afterPack runs, stripping
-      # any signature.  By separating "dir" from "--prepackaged nsis" we sign
-      # once between the two phases and the signature survives into the installer.
-      - name: Phase 1 — unpack app (x64, ia32, arm64; no installer)
-        env:
-          GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: yarn run electron-builder --win dir --x64 --ia32 --arm64 --publish=never
-
-      # ── Phase 2: sign VPNUK.exe in every unpacked arch dir ────────────────
-      # CodeSignTool requires absolute paths (-input_file_path / -output_dir_path).
-      - name: Phase 2 — sign VPNUK.exe in all arch dirs
+      # ── Build: full multi-arch NSIS installer (x64 + ia32 + arm64) ──────────
+      # sign.js (win.sign hook) is called by electron-builder AFTER rcedit
+      # re-stamps each arch's VPNUK.exe, so the eSigner signature survives
+      # into the assembled NSIS installer.  This produces the correct ~177 MB
+      # three-arch installer instead of the 62 MB single-arch output that the
+      # old --prepackaged approach generated.
+      - name: Build NSIS installers (x64 + ia32 + arm64, signed via sign.js)
         shell: pwsh
         env:
-          ESIGNER_USERNAME:      ${{ secrets.ESIGNER_USERNAME }}
-          ESIGNER_PASSWORD:      ${{ secrets.ESIGNER_PASSWORD }}
-          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
-          ESIGNER_TOTP_SECRET:   ${{ secrets.ESIGNER_TOTP_SECRET }}
-        run: |
-          $failed = $false
-          foreach ($arch in @('win-unpacked', 'win-ia32-unpacked', 'win-arm64-unpacked')) {
-            $exeRel = ".\release\$arch\VPNUK.exe"
-            if (-not (Test-Path $exeRel)) {
-              Write-Host "SKIP (not found): $exeRel"
-              continue
-            }
-            # Absolute paths required by CodeSignTool
-            $exe     = (Resolve-Path $exeRel).Path
-            $outDir  = "$env:TEMP\signed-$arch"
-            New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-
-            $origSize = (Get-Item $exe).Length
-            Write-Host "Signing [$arch]  $exe  ($([math]::Round($origSize/1MB,1)) MB)"
-
-            $p = Start-Process `
-              -FilePath    $env:CST_BAT `
-              -ArgumentList @(
-                "sign",
-                "-username=$env:ESIGNER_USERNAME",
-                "-password=$env:ESIGNER_PASSWORD",
-                "-credential_id=$env:ESIGNER_CREDENTIAL_ID",
-                "-totp_secret=$env:ESIGNER_TOTP_SECRET",
-                "-input_file_path=$exe",
-                "-output_dir_path=$outDir",
-                "-override=true"
-              ) `
-              -WorkingDirectory $env:CST_DIR `
-              -Wait -PassThru -NoNewWindow
-
-            if ($p.ExitCode -ne 0) {
-              Write-Host "ERROR: CodeSignTool exit $($p.ExitCode) for $arch"
-              $failed = $true; continue
-            }
-
-            $signed = Join-Path $outDir "VPNUK.exe"
-            if (-not (Test-Path $signed)) {
-              Write-Host "ERROR: signed output not found at $signed"
-              $failed = $true; continue
-            }
-
-            Copy-Item $signed $exe -Force
-
-            $sig     = Get-AuthenticodeSignature $exe
-            $subject = $sig.SignerCertificate?.Subject ?? "(none)"
-            Write-Host "  -> status=$($sig.Status)  signer=$subject  size=$((Get-Item $exe).Length)"
-            if ($sig.Status -ne 'Valid') {
-              Write-Host "ERROR: signature invalid for $arch\VPNUK.exe"
-              $failed = $true
-            }
-          }
-          if ($failed) { throw "One or more VPNUK.exe files could not be signed." }
-          Write-Host "All VPNUK.exe files signed OK."
-
-      # ── Phase 3: build NSIS installers from the pre-signed dirs ──────────
-      # --prepackaged tells electron-builder to skip packing and build the
-      # installer from the supplied pre-existing directory.
-      # nsis (multi-arch x64+ia32+arm64) and nsis-web (x64 stub + 7z) are
-      # both built from the signed win-unpacked x64 dir.
-      - name: Phase 3 — build NSIS installers from pre-signed dirs
-        env:
           GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        shell: pwsh
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          CST_BAT:                     ${{ env.CST_BAT }}
+          CST_DIR:                     ${{ env.CST_DIR }}
+          ESIGNER_USERNAME:            ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD:            ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_CREDENTIAL_ID:       ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_TOTP_SECRET:         ${{ secrets.ESIGNER_TOTP_SECRET }}
         run: |
-          # For the full installer we pass all three arches so the installer is
-          # the expected ~177 MB size.  With --prepackaged, electron-builder skips
-          # repacking entirely (no rcedit re-stamp), so every arch slot ends up
-          # using the signed x64 dir — x64 machines get native signed content;
-          # arm64 Windows runs x64 via built-in emulation; ia32 is covered too.
-          $preX64   = (Resolve-Path ".\release\win-unpacked").Path
-          $preIa32  = (Resolve-Path ".\release\win-ia32-unpacked").Path
-          $preArm64 = (Resolve-Path ".\release\win-arm64-unpacked").Path
-          Write-Host "Pre-packaged dirs: x64=$preX64  ia32=$preIa32  arm64=$preArm64"
-
-          # Full multi-arch installer: one --prepackaged pass per arch so each
-          # arch slot carries its own signed executable.
-          # electron-builder merges the three prepackaged dirs into one NSIS
-          # installer when all three --prepackaged calls share the same output dir.
-          # Simplest supported path: run all three arches in one call pointing at
-          # the x64 dir; each arch slot will contain signed x64 content.
-          # Print electron-builder version so we know which NSIS template is in use
           $ebVer = (Get-Content node_modules/electron-builder/package.json | ConvertFrom-Json).version
           Write-Host "electron-builder version: $ebVer"
+          yarn run electron-builder --win nsis     --x64 --ia32 --arm64 --publish=never
+          yarn run electron-builder --win nsis-web --x64             --publish=never
 
-          # Redirect temp so we can find the generated .nsi script before EB deletes it
-          $nsisCapture = "D:\nsis-capture"
-          New-Item -ItemType Directory -Path $nsisCapture -Force | Out-Null
-          $env:ELECTRON_BUILDER_CACHE = $nsisCapture
-          # Point TEMP/TMP so makensis temp files land in our capture dir
-          $origTemp = $env:TEMP
-          $env:TEMP = $nsisCapture
-          $env:TMP  = $nsisCapture
-
-          yarn run electron-builder --win nsis     --x64 --ia32 --arm64 --prepackaged $preX64   --publish=never
-          yarn run electron-builder --win nsis-web --x64             --prepackaged $preX64   --publish=never
-
-          $env:TEMP = $origTemp
-          $env:TMP  = $origTemp
-
-          # Dump custom macro refs from ALL template .nsh and .nsi files
-          Write-Host ""
-          Write-Host "=== Template files: grep for custom macro / include references ==="
-          $tplDir = "node_modules/app-builder-lib/templates/nsis"
-          Write-Host "Template files in $tplDir :"
-          Get-ChildItem $tplDir -Recurse | Where-Object { -not $_.PSIsContainer } | ForEach-Object { Write-Host "  $($_.Name)" }
-          Write-Host ""
-          Get-ChildItem $tplDir -Recurse -Include "*.nsh","*.nsi" | ForEach-Object {
-            $lines = Get-Content $_.FullName
-            $matches2 = @()
-            for ($i = 0; $i -lt $lines.Count; $i++) {
-              if ($lines[$i] -match "customCreateDesktopIcon|customInstall|extension\.nsh|CUSTOM_HEADER|!include.*custom|!ifdef.*custom|!insertmacro.*custom") {
-                $matches2 += "  L$($i+1): $($lines[$i])"
-              }
-            }
-            if ($matches2) {
-              Write-Host "--- $($_.Name) ---"
-              $matches2 | ForEach-Object { Write-Host $_ }
-            }
-          }
-
-          # Also search for generated .nsi files (any extension) in temp dirs
-          Write-Host ""
-          Write-Host "=== Searching for generated installer scripts in temp dirs ==="
-          $searchDirs = @($nsisCapture, $origTemp, "D:\a", "$env:LOCALAPPDATA\Temp")
-          foreach ($dir in $searchDirs) {
-            if (Test-Path $dir) {
-              Get-ChildItem $dir -Filter "*.nsi" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-                if ($_.FullName -notmatch "node_modules") {
-                  Write-Host "GENERATED NSI: $($_.FullName)"
-                  $lines = Get-Content $_.FullName
-                  for ($i = 0; $i -lt $lines.Count; $i++) {
-                    if ($lines[$i] -match "customCreateDesktopIcon|customInstall|extension\.nsh|CUSTOM_HEADER") {
-                      Write-Host "  L$($i+1): $($lines[$i])"
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-      # ── Diagnostic: confirm VPNUK.exe is signed at each point ─────────────
-      - name: Diagnose — signatures in win*-unpacked, nsis-web 7z, and full installer
-        shell: pwsh
-        run: |
-          Write-Host "=== win*-unpacked VPNUK.exe (after Phase 3) ==="
-          foreach ($dir in (Get-ChildItem .\release -Directory -Filter "win*-unpacked")) {
-            $exe = Join-Path $dir.FullName "VPNUK.exe"
-            if (Test-Path $exe) {
-              $sig = Get-AuthenticodeSignature $exe
-              Write-Host "$($dir.Name)\VPNUK.exe  size=$((Get-Item $exe).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
-            }
-          }
-
-          Write-Host ""
-          Write-Host "=== VPNUK.exe inside nsis-web 7z ==="
-          $z = Get-ChildItem .\release\nsis-web\*.7z -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($z) {
-            $outTmp = "$env:TEMP\nsis7z_check"
-            New-Item -ItemType Directory -Path $outTmp -Force | Out-Null
-            & 7z e $z.FullName VPNUK.exe "-o$outTmp" -y | Out-Null
-            $extracted = Join-Path $outTmp "VPNUK.exe"
-            if (Test-Path $extracted) {
-              $sig = Get-AuthenticodeSignature $extracted
-              Write-Host "$($z.Name) -> VPNUK.exe  size=$((Get-Item $extracted).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
-            } else {
-              Write-Host "VPNUK.exe not found in 7z root — listing:"
-              & 7z l $z.FullName VPNUK.exe
-            }
-          } else {
-            Write-Host "No nsis-web 7z found"
-          }
-
-          # ── KEY CHECK: extract VPNUK.exe from inside the compiled full NSIS installer ──
-          # This confirms whether the signature survived into the embedded 7z blocks.
-          # 7z can open NSIS self-extracting archives; for electron-builder multi-arch
-          # the inner archive is a 7z stream — we list first, then extract VPNUK.exe.
-          Write-Host ""
-          Write-Host "=== VPNUK.exe INSIDE compiled full installer (the ground truth) ==="
-          $installer = Get-ChildItem .\release\*.exe | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
-          if ($installer) {
-            Write-Host "Installer: $($installer.Name)  size=$([math]::Round($installer.Length/1MB,1)) MB"
-            $extDir = "$env:TEMP\full_installer_ext"
-            New-Item -ItemType Directory -Path $extDir -Force | Out-Null
-
-            # Step 1: list the NSIS content so we understand the archive structure
-            Write-Host "-- 7z listing of installer contents (filtered) --"
-            & 7z l $installer.FullName 2>&1 | Where-Object { $_ -match "VPNUK|\.7z|\.exe|\.nsis|Date|Size|Name" } | Select-Object -First 40
-
-            # Step 2: extract everything (NSIS stores the app as an inner 7z stream)
-            & 7z e $installer.FullName "-o$extDir" -y 2>&1 | Out-Null
-
-            # Step 3: check for extracted VPNUK.exe or inner 7z files that contain it
-            $vpnExes = Get-ChildItem $extDir -Filter "VPNUK.exe" -ErrorAction SilentlyContinue
-            if ($vpnExes) {
-              foreach ($v in $vpnExes) {
-                $sig = Get-AuthenticodeSignature $v.FullName
-                Write-Host "DIRECT: $($v.Name)  size=$($v.Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
-              }
-            } else {
-              Write-Host "VPNUK.exe not directly in first extraction layer — looking for inner 7z..."
-              $inner7zFiles = Get-ChildItem $extDir -Filter "*.7z" -ErrorAction SilentlyContinue
-              if ($inner7zFiles) {
-                foreach ($inner in $inner7zFiles) {
-                  Write-Host "  Inner archive: $($inner.Name)  size=$([math]::Round($inner.Length/1MB,1)) MB"
-                  $inner2Dir = "$extDir\$($inner.BaseName)"
-                  New-Item -ItemType Directory -Path $inner2Dir -Force | Out-Null
-                  & 7z e $inner.FullName VPNUK.exe "-o$inner2Dir" -y 2>&1 | Out-Null
-                  $v2 = Join-Path $inner2Dir "VPNUK.exe"
-                  if (Test-Path $v2) {
-                    $sig = Get-AuthenticodeSignature $v2
-                    Write-Host "  -> VPNUK.exe  size=$((Get-Item $v2).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
-                  } else {
-                    Write-Host "  -> VPNUK.exe not found in $($inner.Name)"
-                  }
-                }
-              } else {
-                Write-Host "  No inner 7z files found. Listing extracted:"
-                Get-ChildItem $extDir | Select-Object -First 20 | ForEach-Object { Write-Host "  $($_.Name)  $($_.Length)" }
-              }
-            }
-          } else {
-            Write-Host "No full installer found"
-          }
-
+      # ── Verify: silent-install the full installer and check everything ───────
       - name: Verify installed VPNUK.exe signature (silent install test)
         shell: pwsh
         run: |
-          # Silently install the full NSIS installer — CI runner is already Administrator
           $installer = Get-ChildItem .\release\*.exe | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
-          Write-Host "Silent-installing: $($installer.Name)"
+          Write-Host "Silent-installing: $($installer.Name)  size=$([math]::Round($installer.Length/1MB,1)) MB"
           $proc = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -PassThru
-          $timedOut = -not $proc.WaitForExit(480000)  # 8-minute timeout
+          $timedOut = -not $proc.WaitForExit(480000)
           if ($timedOut) {
-            Write-Host "WARNING: installer timed out after 3 min — killing"
+            Write-Host "WARNING: installer timed out — killing"
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           } else {
             Write-Host "Installer exit code: $($proc.ExitCode)"
           }
-          Start-Sleep -Seconds 5  # allow post-install steps to settle
+          Start-Sleep -Seconds 5
 
-          # Check all likely install locations
+          # Check installed exe
           $candidates = @(
             "C:\Program Files\VPNUK\VPNUK.exe",
             "C:\Program Files (x86)\VPNUK\VPNUK.exe",
-            "$env:LOCALAPPDATA\Programs\VPNUK\VPNUK.exe",
-            "$env:APPDATA\VPNUK\VPNUK.exe"
+            "$env:LOCALAPPDATA\Programs\VPNUK\VPNUK.exe"
           )
-          $found = $false
           foreach ($p in $candidates) {
             if (Test-Path $p) {
-              $found = $true
               $sig = Get-AuthenticodeSignature $p
-              Write-Host "INSTALLED EXE: $p"
-              Write-Host "  size=$((Get-Item $p).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
-            }
-          }
-          if (-not $found) {
-            Write-Host "Could not find VPNUK.exe in any expected location. Searching..."
-            Get-ChildItem "C:\Program Files" -Filter "VPNUK.exe" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-              $sig = Get-AuthenticodeSignature $_.FullName
-              Write-Host "FOUND: $($_.FullName)  size=$($_.Length)  status=$($sig.Status)"
-            }
-            Get-ChildItem "C:\Program Files (x86)" -Filter "VPNUK.exe" -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
-              $sig = Get-AuthenticodeSignature $_.FullName
-              Write-Host "FOUND: $($_.FullName)  size=$($_.Length)  status=$($sig.Status)"
+              Write-Host "INSTALLED: $p  size=$((Get-Item $p).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
             }
           }
 
-          # Show the schtasks task that was created
+          # schtasks task
           Write-Host ""
           Write-Host "=== schtasks VPNUK task ==="
           schtasks /Query /TN "VPNUK" /FO LIST 2>&1 | ForEach-Object { Write-Host $_ }
 
-          # Print schtasks task-creation log (written by customInstall Register-ScheduledTask)
-          Write-Host ""
-          Write-Host "=== schtasks_exit.txt ==="
-          $taskLog = "C:\Program Files\VPNUK\schtasks_exit.txt"
-          if (Test-Path $taskLog) { Write-Host (Get-Content $taskLog) }
-          else { Write-Host "(schtasks_exit.txt not found — Register-ScheduledTask not yet run?)" }
-
-          # Check extension.nsh load probe
-          Write-Host ""
-          Write-Host "=== extension.nsh load probe ==="
-          $probePath = "$env:TEMP\extension_nsh_loaded.txt"
-          if (Test-Path $probePath) {
-            Write-Host "PROBE: extension.nsh WAS loaded — $(Get-Content $probePath)"
-          } else {
-            Write-Host "PROBE MISSING: extension.nsh was NOT loaded"
-            # Also check INSTDIR for customInstall probe
-            if (Test-Path "C:\Program Files\VPNUK\customInstall_ran.txt") {
-              Write-Host "INSTDIR probe: customInstall DID run"
-            } else {
-              Write-Host "INSTDIR probe: customInstall did NOT run"
-            }
-          }
-
-          # Show desktop shortcut target
+          # Desktop shortcut
           Write-Host ""
           Write-Host "=== Desktop shortcut ==="
-          $lnks = @(
-            "$env:PUBLIC\Desktop\VPNUK.lnk",
-            "$env:USERPROFILE\Desktop\VPNUK.lnk"
-          )
-          foreach ($lnk in $lnks) {
+          foreach ($lnk in @("$env:PUBLIC\Desktop\VPNUK.lnk", "$env:USERPROFILE\Desktop\VPNUK.lnk")) {
             if (Test-Path $lnk) {
               $sh = New-Object -COM WScript.Shell
               $sc = $sh.CreateShortcut($lnk)
-              Write-Host "Shortcut: $lnk"
-              Write-Host "  Target: $($sc.TargetPath)"
-              Write-Host "  Args:   $($sc.Arguments)"
+              Write-Host "Shortcut: $lnk  Target=$($sc.TargetPath)  Args=$($sc.Arguments)"
             }
           }
 
