@@ -31,18 +31,25 @@
         Pop $0
     ${EndIf}
 
-    ; ─── Task Scheduler ─────────────────────────────────────────────────────────
-    ; On-demand task at HIGHEST privilege.  Shortcuts target schtasks.exe /Run
-    ; so launching the app does not trigger a UAC elevation prompt or UAC shield.
-    nsExec::ExecToStack 'schtasks /Delete /TN "VPNUK" /F'
-    Pop $0
-    Pop $0
-    ; /TR must be single-quoted with the literal " chars from this string.
-    ; $"...$" would produce ""path"" (double-double-quotes) which CommandLineToArgvW
-    ; parses as an empty TR argument.  "path" (one pair) is the correct form.
-    nsExec::ExecToStack 'schtasks /Create /TN "VPNUK" /TR "$INSTDIR\VPNUK.exe" /SC ONDEMAND /RL HIGHEST /F'
-    Pop $0
-    Pop $0
+    ; ─── Task Scheduler via PowerShell ──────────────────────────────────────────
+    ; Register-ScheduledTask is used instead of schtasks.exe CLI because the CLI
+    ; /RL HIGHEST + /SC ONDEMAND combination can fail depending on Windows edition
+    ; and group policy.  PowerShell's cmdlet handles all privilege configuration
+    ; internally and handles paths-with-spaces cleanly.
+    ;
+    ; The task runs VPNUK.exe on demand at the highest available privilege for any
+    ; member of BUILTIN\Administrators.  The shortcut targets schtasks.exe /Run
+    ; so Windows does not show the UAC shield on the desktop icon.
+    FileOpen $R9 "$TEMP\vpnuk_task.ps1" w
+    FileWrite $R9 "$$action    = New-ScheduledTaskAction -Execute '$INSTDIR\VPNUK.exe'$\r$\n"
+    FileWrite $R9 "$$principal = New-ScheduledTaskPrincipal -GroupId 'BUILTIN\Administrators' -RunLevel Highest$\r$\n"
+    FileWrite $R9 "$$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries$\r$\n"
+    FileWrite $R9 "Register-ScheduledTask -TaskName 'VPNUK' -Action $$action -Principal $$principal -Settings $$settings -Force | Out-Null$\r$\n"
+    FileClose $R9
+    nsExec::ExecToStack 'powershell -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "$TEMP\vpnuk_task.ps1"'
+    Pop $0  ; PS exit code (0 = success)
+    Pop $0  ; discard stdout text
+    Delete "$TEMP\vpnuk_task.ps1" 
 
     ; ─── Shortcuts → schtasks.exe ────────────────────────────────────────────────
     ; electron-builder creates shortcuts pointing to VPNUK.exe (which shows the UAC
