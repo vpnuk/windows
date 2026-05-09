@@ -15,7 +15,7 @@
   "description": "VPNUK desktop application",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vpnuk/vpnuk-windows"
+    "url": "https://github.com/vpnuk/windows"
   },
   "main": "app/main/main.js",
   "config-overrides-path": "app/modules/config-overrides.js",
@@ -33,7 +33,7 @@
     "start": "concurrently --kill-others \"dotenv cross-var yarn run react-start\" \"wait-on http://localhost:3000 && yarn run dotenv cross-var electron .\"",
     "react-test": "react-app-rewired test",
     "react-eject": "react-app-rewired eject",
-    "pspath-import": "powershell [Environment]::SetEnvironmentVariable(\"PSModulePath\", [Environment]::GetEnvironmentVariable(\"PSModulePath\", \"Machine\") + [System.IO.Path]::PathSeparator + \"C:\\Users\\kryuc\\git\\vpnuk-windows\\VpnHelper\\bin\\\", \"Machine\")"
+    "pspath-import": "powershell [Environment]::SetEnvironmentVariable(\"PSModulePath\", [Environment]::GetEnvironmentVariable(\"PSModulePath\", \"Machine\") + [System.IO.Path]::PathSeparator + \"C:\\Users\\kryuc\\git\\windows\\VpnHelper\\bin\\\", \"Machine\")"
   },
   "productName": "VPNUK",
   "build": {
