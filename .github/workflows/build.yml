@@ -193,17 +193,16 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          $build   = "${{ github.run_number }}"
-          $tag     = "v$version-build$build"
-          $title   = "VPNUK $version (build $build)"
+          $tag     = "v$version"
+          $title   = "VPNUK $version"
 
           foreach ($exe in (Get-ChildItem .\release\*.exe)) {
-            $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
-            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
+            $n = $exe.Name -replace ' ', '-'
+            if ($n -ne $exe.Name) { Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n) }
           }
           foreach ($exe in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)) {
-            $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-web-build$build.exe"
-            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
+            $n = $exe.Name -replace ' ', '-'
+            if ($n -ne $exe.Name) { Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n) }
           }
 
           $artifacts = @()
@@ -215,4 +214,4 @@ jobs:
           Write-Host "Tag: $tag | Title: $title"
           $artifacts | ForEach-Object { Write-Host "Artifact: $_" }
 
-          gh release create "$tag" --title "$title" --draft --notes "Build $build" @artifacts
+          gh release create "$tag" --title "$title" --draft --notes "" @artifacts
