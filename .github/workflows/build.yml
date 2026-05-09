@@ -187,22 +187,33 @@ jobs:
           if ($failed) { throw "One or more installer wrappers failed signature verification" }
           Write-Host "All installer signatures verified OK."
 
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ github.run_number }}
+          path: |
+            release/*.exe
+            release/nsis-web/*.exe
+            release/nsis-web/*.7z
+          retention-days: 7
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          $tag     = "v$version"
-          $title   = "VPNUK $version"
+          $build   = "${{ github.run_number }}"
+          $tag     = "v$version-build$build"
+          $title   = "VPNUK $version (build $build)"
 
           foreach ($exe in (Get-ChildItem .\release\*.exe)) {
-            $n = $exe.Name -replace ' ', '-'
-            if ($n -ne $exe.Name) { Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n) }
+            $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
+            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
           }
           foreach ($exe in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)) {
-            $n = $exe.Name -replace ' ', '-'
-            if ($n -ne $exe.Name) { Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n) }
+            $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-web-build$build.exe"
+            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
           }
 
           $artifacts = @()
@@ -214,4 +225,4 @@ jobs:
           Write-Host "Tag: $tag | Title: $title"
           $artifacts | ForEach-Object { Write-Host "Artifact: $_" }
 
-          gh release create "$tag" --title "$title" --draft --notes "" @artifacts
+          gh release create "$tag" --title "$title" --draft --notes "Build $build" @artifacts
