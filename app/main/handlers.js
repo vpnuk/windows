@@ -34,7 +34,6 @@ const { downloadWireGuardInstaller } = require('../modules/catalogs');
 const isDev = process.env.ELECTRON_ENV === 'Dev';
 
 let vpnConnection = null;
-let _connectId = 0;
 
 // ─── Kill-switch crash-recovery state file ────────────────────────────────────
 // Written to disk whenever the kill switch is active so that if the app is
@@ -140,7 +139,6 @@ ipcMain.on('connection-start', async (event, args) => {
 
     vpnConnection = createVpn(profile, {
         connectedHook: async () => {
-            const thisId = ++_connectId;
             appendToLog(pid, `Hook: connected to ${profile.server?.label}`);
             if (profile.killSwitchEnabled) {
                 // Remove the ISP default route — all traffic must now flow through
@@ -165,9 +163,7 @@ ipcMain.on('connection-start', async (event, args) => {
             // too early returns the ISP address instead of the VPN exit IP.
             // Wait 3 s for routing to stabilise, then do the lookup through the tunnel.
             await new Promise(r => setTimeout(r, 3000));
-            if (_connectId !== thisId) return; // disconnected during the wait — abort
             const ip = await publicIp.v4({ timeout: 10000 }).catch(() => null);
-            if (_connectId !== thisId) return; // disconnected during IP lookup — abort
             appendToLog(pid, `Public IP after connect: ${ip || '(lookup failed)'}`);
             if (ip) {
                 tray.setConnectedState(`Connected to ${profile.server.label}\nYour IP: ${ip}`);
@@ -178,25 +174,13 @@ ipcMain.on('connection-start', async (event, args) => {
         // intentional = true  → user clicked Disconnect (restore internet)
         // intentional = false → tunnel dropped unexpectedly (keep internet blocked)
         disconnectedHook: (intentional = true) => {
-            _connectId++; // cancel any in-flight connectedHook IP lookup
             appendToLog(pid, `Hook: disconnected (intentional=${intentional})`);
             try {
                 event.sender.send('connection-changed', connectionStates.disconnected);
             } catch (error) {
                 if (error.message !== 'Object has been destroyed') throw error;
             }
-            // Update tray icon immediately (silent — the balloon below replaces it).
-            tray.setStateSilent(connectionStates.disconnected, 'Disconnected');
-            // Fetch ISP IP (routing restores quickly) then show one clean balloon.
-            publicIp.v4({ timeout: 6000 }).catch(() => null).then(ip => {
-                const content = ip
-                    ? `Protection disabled. IP: ${ip}`
-                    : 'Protection disabled';
-                tray.notify('VPNUK Disconnected', content, connectionStates.disconnected);
-                if (ip) tray.setStateSilent(
-                    connectionStates.disconnected, `Disconnected\nYour IP: ${ip}`
-                );
-            });
+            tray.setDisconnectedState('Disconnected');
 
             if (profile.killSwitchEnabled) {
                 if (intentional) {
@@ -371,44 +355,14 @@ ipcMain.on('wg-update-request', async (event, arg) => {
 });
 
 // ─── Auto-run (Windows startup) ───────────────────────────────────────────────
-// app.setLoginItemSettings() silently fails for admin-elevated apps because
-// Windows will not auto-launch a requireAdministrator process at login
-// without a UAC prompt (which no one sees at boot time).
-// Instead we register an ONLOGON scheduled task at HIGHEST privilege —
-// the same mechanism used by the desktop shortcut — so the app starts
-// elevated without any UAC prompt.
 
 ipcMain.on('auto-run-toggle', (_, enable) => {
     isDev && console.log('auto-run-toggle', enable);
-    const cp  = require('child_process');
-    const fs  = require('fs');
-    const os  = require('os');
-    const path = require('path');
-
+    const exePath = app.getPath('exe');
     if (enable) {
-        // Use PowerShell Register-ScheduledTask via a temp .ps1 file to avoid
-        // quoting issues with schtasks CLI.  Mirrors the installer's customInstall
-        // approach so auto-start uses the same Administrators/Highest privilege model
-        // as the desktop shortcut — no UAC prompt at login.
-        const exePath = app.getPath('exe').replace(/'/g, "''"); // escape PS single-quotes
-        const psLines = [
-            `$action    = New-ScheduledTaskAction -Execute '${exePath}'`,
-            `$trigger   = New-ScheduledTaskTrigger -AtLogon`,
-            `$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\\$env:USERNAME" -LogonType Interactive -RunLevel Highest`,
-            `$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan)`,
-            `Register-ScheduledTask -TaskName 'VPNUK-Startup' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null`,
-        ].join('\r\n');
-        const tmp = path.join(os.tmpdir(), 'vpnuk_startup.ps1');
-        try { fs.writeFileSync(tmp, psLines, 'utf8'); } catch (_) {}
-        cp.exec(
-            `powershell -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "${tmp}"`,
-            err => {
-                try { fs.unlinkSync(tmp); } catch (_) {}
-                isDev && err && console.error('auto-run enable:', err.message);
-            }
-        );
+        app.setLoginItemSettings({ openAtLogin: true, path: exePath });
     } else {
-        cp.exec('schtasks /Delete /TN "VPNUK-Startup" /F', () => {});
+        app.setLoginItemSettings({ openAtLogin: false });
     }
 });
 
@@ -461,6 +415,12 @@ ipcMain.on('open-wg-manage', () => {
     wgManageWindow.loadURL('https://clientcp.vpnuk.info/vpnuk/clients/wireguard_v2.php');
     wgManageWindow.setMenuBarVisibility(false);
     wgManageWindow.on('closed', () => { wgManageWindow = null; });
+});
+
+ipcMain.on('open-external', (_, url) => {
+    if (typeof url === 'string' && url.startsWith('https://')) {
+        shell.openExternal(url);
+    }
 });
 
 ipcMain.on('open-live-help', () => {

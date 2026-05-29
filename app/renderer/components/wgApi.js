@@ -73,6 +73,18 @@ const applyMtu = (conf, mtuValue) => {
     return conf.replace(/(\[Interface\][^\n]*\n)/, `$1MTU = ${mtuValue}\n`);
 };
 
+// Inject or replace the AllowedIPs line in the [Peer] section.
+const applyAllowedIps = (conf, allowedIpsOption) => {
+    if (!allowedIpsOption) return conf;
+    const raw = allowedIpsOption.isCustom
+        ? (allowedIpsOption.customValue || '').trim()
+        : allowedIpsOption.value;
+    if (!raw || raw === 'custom') return conf;
+    const line = `AllowedIPs = ${raw}`;
+    if (/^AllowedIPs\s*=/m.test(conf)) return conf.replace(/^AllowedIPs\s*=.*/m, line);
+    return conf.replace(/(\[Peer\][^\n]*\n)/, `$1${line}\n`);
+};
+
 // Inject or replace the DNS line in the [Interface] section.
 const applyDns = (conf, dnsAddresses) => {
     if (!dnsAddresses || !dnsAddresses.length) return conf;
@@ -94,7 +106,7 @@ const getConfEndpointIp = confPath => {
 
 // ── Server API calls ──────────────────────────────────────────────────────────
 
-const fetchWgConfig = async ({ login, password, serverHost, mtuValue, dnsAddresses, confPath }) => {
+const fetchWgConfig = async ({ login, password, serverHost, mtuValue, dnsAddresses, allowedIpsOption, confPath }) => {
     const deviceLabel = getDeviceLabel();
     const params = new URLSearchParams({
         action:       'get_config',
@@ -119,6 +131,7 @@ const fetchWgConfig = async ({ login, password, serverHost, mtuValue, dnsAddress
         conf = patchEndpointToIp(conf, serverHost);
         conf = applyMtu(conf, mtuValue);
         conf = applyDns(conf, dnsAddresses);
+        conf = applyAllowedIps(conf, allowedIpsOption);
         fs.writeFileSync(confPath, conf, 'utf-8');
         return { success: true };
     }
@@ -174,8 +187,9 @@ const ensureWgConfig = async (profile, onStatus) => {
     const serverLabel = (profile.server && profile.server.label) || '(none)';
     const serverType  = profile.serverType || 'shared';
     const isDedicated = serverType === 'dedicated' || serverType === 'dedicated11';
-    const mtuValue    = (profile.details && profile.details.mtu && profile.details.mtu.value) || '';
-    const dnsValue    = (profile.details && profile.details.dns && profile.details.dns.value) || [];
+    const mtuValue       = (profile.details && profile.details.mtu && profile.details.mtu.value) || '';
+    const dnsValue       = (profile.details && profile.details.dns && profile.details.dns.value) || [];
+    const allowedIpsOpt  = (profile.details && profile.details.allowedIps) || null;
 
     logToFile(profileId, `[wgApi] serverType=${serverType}  isDedicated=${isDedicated}`);
     logToFile(profileId, `[wgApi] server="${serverLabel}"  host=${serverHost || '(using dedicated)'}`);
@@ -228,7 +242,7 @@ const ensureWgConfig = async (profile, onStatus) => {
     log(`${verb} WireGuard config for "${serverLabel}"\u2026`);
     logToFile(profileId, `[wgApi] Calling get_config  server=${serverHost || '(dedicated)'}`);
 
-    const result = await fetchWgConfig({ login, password, serverHost, mtuValue, dnsAddresses: dnsValue, confPath });
+    const result = await fetchWgConfig({ login, password, serverHost, mtuValue, dnsAddresses: dnsValue, allowedIpsOption: allowedIpsOpt, confPath });
 
     if (!result.success) {
         logToFile(profileId, `[wgApi] get_config FAILED: ${result.error}`);
@@ -263,7 +277,7 @@ const ensureWgConfig = async (profile, onStatus) => {
                     logToFile(profileId, `[wgApi] IP CONFLICT with ${otherType} conf — deleting and regenerating`);
                     await deleteWgConfig({ login, password, serverHost });
                     logToFile(profileId, `[wgApi] delete_config done (conflict resolution)`);
-                    const fresh = await fetchWgConfig({ login, password, serverHost, mtuValue, dnsAddresses: dnsValue, confPath });
+                    const fresh = await fetchWgConfig({ login, password, serverHost, mtuValue, dnsAddresses: dnsValue, allowedIpsOption: allowedIpsOpt, confPath });
                     if (!fresh.success) {
                         logToFile(profileId, `[wgApi] Regeneration FAILED: ${fresh.error}`);
                         return fresh;
@@ -285,6 +299,7 @@ module.exports = {
     getDeviceLabel,
     patchEndpointToIp,
     applyMtu,
+    applyAllowedIps,
     getConfEndpointIp,
     fetchWgConfig,
     deleteWgConfig,

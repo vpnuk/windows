@@ -73,9 +73,14 @@ const VpnType = {
     WireGuard: { label: 'WireGuard' },
     OpenVPN:   { label: 'OpenVPN' },
     IKEv2:     { label: 'IKEv2' },
-    L2TP:      { label: 'L2TP' },
-    PPTP:      { label: 'PPTP' },
 };
 exports.VpnType = VpnType;
+
+exports.optionsAllowedIps = [
+    { value: '0.0.0.0/0, ::/0',         label: 'Default',      isCustom: false },
+    { value: '0.0.0.0/0',               label: 'IPv4 Only',    isCustom: false },
+    { value: '0.0.0.0/1, 128.0.0.0/1', label: 'Home Network', isCustom: false },
+    { value: 'custom',                   label: 'Custom',       isCustom: true  },
+];
 
 exports.WG_AUTH_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wg_v2_app_api.php';

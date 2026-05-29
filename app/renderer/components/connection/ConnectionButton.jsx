@@ -76,7 +76,39 @@ const ConnectionButton = observer(() => {
     return (
         <div>
             {/* ── Persistent status panel — always visible above the button ── */}
-            {errorMsg ? (
+            {ConnectionLogStore.isExpired ? (
+                <div style={{
+                    ...S.error,
+                    borderColor: 'rgba(230,168,23,0.55)',
+                    background: 'rgba(230,168,23,0.1)',
+                    color: '#e6a817',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                    height: 'auto',
+                    minHeight: PANEL_HEIGHT,
+                }}>
+                    <strong style={{ display: 'block' }}>{'\u26a0'} Subscription Expired</strong>
+                    <span style={{ fontSize: 11 }}>Your VPNUK subscription is no longer active. Renew to continue using the VPN.</span>
+                    <button
+                        onClick={() => ipcRenderer.send('open-external', 'https://www.vpnuk.net/my-account/subscriptions/')}
+                        style={{
+                            marginTop: 4,
+                            padding: '5px 12px',
+                            background: '#e6a817',
+                            color: '#000',
+                            border: 'none',
+                            borderRadius: 4,
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: 12,
+                            alignSelf: 'flex-start',
+                        }}
+                    >
+                        Renew on VPNUK Website {'\u2192'}
+                    </button>
+                </div>
+            ) : errorMsg ? (
                 <>
                 <div style={S.error}>
                     {stepLog.length > 0 && (

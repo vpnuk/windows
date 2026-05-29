@@ -91,18 +91,8 @@ class WindowsVpn extends VpnBase {
             await this.#removeConnection();
         }
 
-        if (this.type === VpnType.L2TP.label) {
-            this.#log('Running L2TP pre-flight (registry NAT-T + ProhibitIpSec + PolicyAgent)');
-            this.#prepareL2tp();
-        }
-        if (this.type === VpnType.PPTP.label) {
-            this.#log('Running PPTP pre-flight (firewall rules TCP-1723 + GRE-47)');
-            this.#preparePptp();
-        }
-        if (this.type === VpnType.IKEv2.label) {
-            this.#log('Running IKEv2 pre-flight (DisableStrictCertificateChecking)');
-            this.#prepareIkev2();
-        }
+        this.#log('Running IKEv2 pre-flight (DisableStrictCertificateChecking)');
+        this.#prepareIkev2();
 
         try {
             this.#log('STEP 1 — Add-VpnConnection (creating profile)');
@@ -112,6 +102,9 @@ class WindowsVpn extends VpnBase {
             this.#log('STEP 2 — Writing phonebook (IpPrioritizeRemote + DNS)');
             await this.#setDns();
             this.#log('STEP 2 complete — phonebook written');
+
+            this.#log('IKEv2 — waiting 600 ms for profile to settle before connecting');
+            await new Promise(r => setTimeout(r, 600));
 
             this.#log('STEP 3 — Connect-Vpn (45 s timeout)');
             await this.#vpnConnect();
@@ -132,7 +125,7 @@ class WindowsVpn extends VpnBase {
 
         if (finalStatus === connectionStates.connected) {
             this.#connectionStatus = connectionStates.connected;
-            if (this.type === VpnType.L2TP.label || this.type === VpnType.IKEv2.label) {
+            if (this.type === VpnType.IKEv2.label) {
                 this.#log('STEP 4 — Applying post-connect default route to active routing table');
                 this.#applyPostConnectRoute();
             }
@@ -190,52 +183,6 @@ class WindowsVpn extends VpnBase {
         ]);
     }
 
-    // ── L2TP/IPSec pre-flight ─────────────────────────────────────────────────
-    #prepareL2tp() {
-        let r;
-
-        r = cp.spawnSync('reg', [
-            'add',
-            'HKLM\\SYSTEM\\CurrentControlSet\\Services\\PolicyAgent',
-            '/v', 'AssumeUDPEncapsulationContextOnSendRule',
-            '/t', 'REG_DWORD', '/d', '2', '/f'
-        ], { shell: true });
-        this.#log(`L2TP-PREP reg AssumeUDPEncapsulationContextOnSendRule=2 → exit ${r.status} ${r.stderr?.toString().trim() || ''}`);
-
-        r = cp.spawnSync('reg', [
-            'add',
-            'HKLM\\SYSTEM\\CurrentControlSet\\Services\\RasMan\\Parameters',
-            '/v', 'ProhibitIpSec',
-            '/t', 'REG_DWORD', '/d', '0', '/f'
-        ], { shell: true });
-        this.#log(`L2TP-PREP reg ProhibitIpSec=0 → exit ${r.status} ${r.stderr?.toString().trim() || ''}`);
-
-        r = cp.spawnSync('sc', ['start', 'PolicyAgent'], { shell: true, timeout: 8000 });
-        this.#log(`L2TP-PREP sc start PolicyAgent → exit ${r.status} ${r.stderr?.toString().trim() || ''}`);
-    }
-
-    // ── PPTP pre-flight ───────────────────────────────────────────────────────
-    #preparePptp() {
-        const rules = [
-            ['VPNUK-PPTP-TCP-1723', 'TCP', '1723'],
-            ['VPNUK-PPTP-GRE-47',   '47',   null ],
-        ];
-        for (const [name, proto, port] of rules) {
-            let r = cp.spawnSync('netsh', [
-                'advfirewall', 'firewall', 'delete', 'rule', `name=${name}`
-            ], { shell: true });
-            this.#log(`PPTP-PREP firewall delete ${name} → exit ${r.status}`);
-
-            const add = [
-                'advfirewall', 'firewall', 'add', 'rule',
-                `name=${name}`, 'dir=out', 'action=allow', `protocol=${proto}`,
-            ];
-            if (port) add.push(`remoteport=${port}`);
-            r = cp.spawnSync('netsh', add, { shell: true });
-            this.#log(`PPTP-PREP firewall add ${name} proto=${proto} → exit ${r.status} ${r.stderr?.toString().trim() || ''}`);
-        }
-    }
-
     // ── IKEv2 pre-flight ──────────────────────────────────────────────────────
     #prepareIkev2() {
         // Windows IKEv2 enforces strict server-certificate EKU checks by default:
@@ -259,22 +206,15 @@ class WindowsVpn extends VpnBase {
             ? (this._server.dns || this._server.host)
             : this._server.host;
 
-        const authMethod = this.type === VpnType.IKEv2.label
-            ? 'Eap'
-            : 'Chap, MsChapv2';
-
-        this.#log(`ADD-CONNECTION TunnelType=${this.type} ServerAddress=${serverAddress} AuthMethod=${authMethod}${this.type === VpnType.L2TP.label ? ' L2tpPsk=***' : ''}`);
+        this.#log(`ADD-CONNECTION TunnelType=${this.type} ServerAddress=${serverAddress} AuthMethod=Eap SplitTunneling=False`);
 
         const result = await this.#logSpawn('powershell', [
             'Add-VpnConnection',
             '-Name', this._name,
             '-TunnelType', this.type,
             '-ServerAddress', serverAddress,
-            this.type === VpnType.L2TP.label
-                ? `-L2tpPsk ${this.#ipseckey}` : '',
-            this.type === VpnType.IKEv2.label
-                ? '-AuthenticationMethod Eap'
-                : '-AuthenticationMethod Chap, MsChapv2',
+            '-AuthenticationMethod Eap',
+            '-SplitTunneling $False',
             '-Force -RememberCredential -PassThru'
         ]);
 

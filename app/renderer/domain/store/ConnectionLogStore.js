@@ -1,8 +1,9 @@
 import { makeAutoObservable } from 'mobx';
 
 class ConnectionLogStore {
-    steps = [];
-    error = '';
+    steps      = [];
+    error      = '';
+    isExpired  = false;
 
     constructor() {
         makeAutoObservable(this);
@@ -13,12 +14,19 @@ class ConnectionLogStore {
     }
 
     setError(msg) {
-        this.error = msg || '';
+        this.error     = msg || '';
+        this.isExpired = false;
+    }
+
+    setSubscriptionExpired() {
+        this.error     = 'Your VPNUK subscription is no longer active.';
+        this.isExpired = true;
     }
 
     clear() {
-        this.steps = [];
-        this.error = '';
+        this.steps     = [];
+        this.error     = '';
+        this.isExpired = false;
     }
 }
 

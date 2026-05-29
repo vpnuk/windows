@@ -1,6 +1,6 @@
 {
   "name": "vpnuk",
-  "version": "1.3.6",
+  "version": "1.3.7",
   "author": "VPNUK",
   "contributors": [
     {
@@ -15,7 +15,7 @@
   "description": "VPNUK desktop application",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vpnuk/windows"
+    "url": "https://github.com/vpnuk/vpnuk-windows"
   },
   "main": "app/main/main.js",
   "config-overrides-path": "app/modules/config-overrides.js",
@@ -28,12 +28,14 @@
     "dotnet-build": "dotnet build VpnHelper\\VpnHelper.csproj -c Release -o .\\VpnHelper\\bin\\VpnHelper",
     "build-react-nsis": "yarn run react-build && yarn run nsis-plugin-copy",
     "build": "yarn run build-react-nsis && yarn run dotnet-build && dotenv cross-var yarn run electron-builder",
+    
     "react-start": "react-app-rewired start",
     "electron-start": "electron .",
     "start": "concurrently --kill-others \"dotenv cross-var yarn run react-start\" \"wait-on http://localhost:3000 && yarn run dotenv cross-var electron .\"",
+    
     "react-test": "react-app-rewired test",
     "react-eject": "react-app-rewired eject",
-    "pspath-import": "powershell [Environment]::SetEnvironmentVariable(\"PSModulePath\", [Environment]::GetEnvironmentVariable(\"PSModulePath\", \"Machine\") + [System.IO.Path]::PathSeparator + \"C:\\Users\\kryuc\\git\\windows\\VpnHelper\\bin\\\", \"Machine\")"
+    "pspath-import": "powershell [Environment]::SetEnvironmentVariable(\"PSModulePath\", [Environment]::GetEnvironmentVariable(\"PSModulePath\", \"Machine\") + [System.IO.Path]::PathSeparator + \"C:\\Users\\kryuc\\git\\vpnuk-windows\\VpnHelper\\bin\\\", \"Machine\")"
   },
   "productName": "VPNUK",
   "build": {
@@ -47,12 +49,6 @@
             "ia32",
             "arm64"
           ]
-        },
-        {
-          "target": "nsis-web",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "icon": "app/assets/icon.ico",
@@ -60,8 +56,7 @@
       "publish": [
         "github"
       ],
-      "publisherName": [],
-      "sign": "./sign.js"
+      "publisherName": "Online Privacy Services Ltd"
     },
     "nsis": {
       "oneClick": false,
@@ -94,9 +89,7 @@
       {
         "from": "VpnHelper/bin/VpnHelper",
         "to": "PSModules/VpnHelper",
-        "filter": [
-          "**/*"
-        ]
+        "filter": ["**/*"]
       }
     ],
     "extends": null

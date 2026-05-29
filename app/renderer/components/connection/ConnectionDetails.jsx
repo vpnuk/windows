@@ -3,13 +3,17 @@ import { action } from 'mobx';
 import { observer } from 'mobx-react-lite';
 import { Checkbox, Switch } from 'antd';
 import '@components/index.css';
-import { optionsMtu } from '@modules/constants.js';
+import { optionsMtu, optionsAllowedIps, VpnType } from '@modules/constants.js';
 import { ValueSelector } from '@components';
 import { Dns, useStore } from '@domain';
 
 const ConnectionDetails = observer(() => {
-    const store = useStore();
+    const store   = useStore();
     const profile = store.profiles.currentProfile;
+    const isWg    = store.settings.vpnType === VpnType.WireGuard.label;
+
+    const allowedIps    = profile.details.allowedIps || { ...optionsAllowedIps[0], customValue: '' };
+    const isCustomAllowedIps = allowedIps.value === 'custom';
 
     return <>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 8 }}>
@@ -74,6 +78,37 @@ const ConnectionDetails = observer(() => {
                         onChange={action(value => profile.details.mtu = value)} />
                 </div>
             </div>
+
+            {/* Allowed IPs — WireGuard only */}
+            {isWg && (
+                <div>
+                    <div className="form-titles" style={{ marginBottom: 6 }}>Allowed IPs</div>
+                    <ValueSelector
+                        options={optionsAllowedIps}
+                        value={optionsAllowedIps.find(o => o.value === allowedIps.value) || optionsAllowedIps[0]}
+                        onChange={action(opt => {
+                            profile.details.allowedIps = {
+                                ...opt,
+                                customValue: allowedIps.customValue || '',
+                            };
+                        })}
+                    />
+                    {isCustomAllowedIps && (
+                        <input
+                            className="form-input"
+                            placeholder="e.g. 10.0.0.0/8, 192.168.1.0/24"
+                            value={allowedIps.customValue || ''}
+                            onChange={action(e => {
+                                profile.details.allowedIps = {
+                                    ...allowedIps,
+                                    customValue: e.target.value,
+                                };
+                            })}
+                            style={{ marginTop: 6, width: '100%', boxSizing: 'border-box' }}
+                        />
+                    )}
+                </div>
+            )}
 
         </div>
     </>;

@@ -2,7 +2,7 @@ import { ipcRenderer } from 'electron';
 import React from 'react';
 import { toJS, runInAction } from 'mobx';
 import { connectionStates, VpnType } from '@modules/constants.js';
-import { ConnectionStore, ConnectionLogStore, WvpnOptions, Servers } from '@domain';
+import { ConnectionStore, ConnectionLogStore, WvpnOptions } from '@domain';
 
 const { ensureWgConfig } = require('../wgApi');
 
@@ -26,16 +26,6 @@ export function useConnectAction(profile) {
 
     const startConnect = async () => {
         ConnectionLogStore.clear();
-
-        // Auto-init server to first catalog entry when user has never explicitly
-        // clicked one — the visual selection fallback (i === 0) in ServerSelector
-        // does not set profile.server, so profile.server.host can still be empty.
-        if (!profile.server?.host) {
-            const catalog = Servers.getCatalog(profile.serverType || 'shared');
-            if (catalog.length > 0) {
-                runInAction(() => { profile.server = catalog[0]; });
-            }
-        }
 
         const details = profile.details || {};
         const mtuVal  = details.mtu?.value;
@@ -62,7 +52,18 @@ export function useConnectAction(profile) {
             setBusy(false);
 
             if (!result.success) {
-                ConnectionLogStore.setError(result.error || 'Could not prepare WireGuard config.');
+                const lower = (result.error || '').toLowerCase();
+                const isExpired = lower.includes('not active')
+                    || lower.includes('expir')
+                    || lower.includes('suspend')
+                    || lower.includes('inactive')
+                    || lower.includes('disabled')
+                    || lower.includes('cancelled');
+                if (isExpired) {
+                    ConnectionLogStore.setSubscriptionExpired();
+                } else {
+                    ConnectionLogStore.setError(result.error || 'Could not prepare WireGuard config.');
+                }
                 return;
             }
 
@@ -82,7 +83,7 @@ export function useConnectAction(profile) {
             pushStep('Handing off to OpenVPN service\u2026');
         }
 
-        // ── Windows native VPN — IKEv2, L2TP, PPTP ───────────────────────────
+        // ── Windows native VPN — IKEv2 ───────────────────────────────────────
         else {
             if (hasMtu) pushStep('Applying custom MTU settings \u2713');
             if (hasDns) pushStep(`Applying custom DNS (${dnsVal.join(', ')}) \u2713`);

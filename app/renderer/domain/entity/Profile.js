@@ -1,6 +1,6 @@
 import { makeAutoObservable, runInAction } from 'mobx';
 import { v4 as uuid } from 'uuid';
-import { optionsMtu, VpnType } from '@modules/constants.js';
+import { optionsMtu, optionsAllowedIps, VpnType } from '@modules/constants.js';
 
 class Profile {
     id = uuid();
@@ -20,6 +20,7 @@ class Profile {
         protocol: 'UDP',
         dns: { label: 'DNS: Default' },
         mtu: optionsMtu.find(o => o.value === ''),
+        allowedIps: { ...optionsAllowedIps[0], customValue: '' },
         killSwitchEnabled: false
     };
     wgConfigFetched = false;
