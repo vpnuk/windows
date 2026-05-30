@@ -137,6 +137,10 @@ ipcMain.on('connection-start', async (event, args) => {
         }
     }
 
+    // Flag cleared by disconnectedHook so async IP lookup does not
+    // fire tray/UI updates after the user has already disconnected.
+    let connectionActive = true;
+
     try {
     vpnConnection = createVpn(profile, {
         connectedHook: async () => {
@@ -159,15 +163,23 @@ ipcMain.on('connection-start', async (event, args) => {
             // Mark connected immediately so the UI responds without waiting for the IP lookup.
             event.sender.send('connection-changed', connectionStates.connected);
             tray.setConnectedState(`Connected to ${profile.server.label}`);
+            tray.setConnectionDetails(profile.vpnType, profile.server.label);
+            const { setJumpListStatus } = require('./utils/jumplist');
+            setJumpListStatus('connected', profile.vpnType, profile.server.label);
             // WireGuard: the tunnel service starts before the kernel completes its
             // handshake and applies the new routing table.  Fetching the public IP
             // too early returns the ISP address instead of the VPN exit IP.
             // Wait 3 s for routing to stabilise, then do the lookup through the tunnel.
             await new Promise(r => setTimeout(r, 3000));
+            // Guard: abort if disconnect happened during the wait.
+            if (!connectionActive) return;
             const ip = await publicIp.v4({ timeout: 10000 }).catch(() => null);
+            // Guard again — disconnect may have happened during the IP lookup.
+            if (!connectionActive) return;
             appendToLog(pid, `Public IP after connect: ${ip || '(lookup failed)'}`);
             if (ip) {
                 tray.setConnectedState(`Connected to ${profile.server.label}\nYour IP: ${ip}`);
+                tray.setExternalIp(ip);
                 event.sender.send('vpn-ip-update', ip);
             }
         },
@@ -175,6 +187,7 @@ ipcMain.on('connection-start', async (event, args) => {
         // intentional = true  → user clicked Disconnect (restore internet)
         // intentional = false → tunnel dropped unexpectedly (keep internet blocked)
         disconnectedHook: (intentional = true) => {
+            connectionActive = false;
             appendToLog(pid, `Hook: disconnected (intentional=${intentional})`);
             try {
                 event.sender.send('connection-changed', connectionStates.disconnected);
@@ -182,6 +195,8 @@ ipcMain.on('connection-start', async (event, args) => {
                 if (error.message !== 'Object has been destroyed') throw error;
             }
             tray.setDisconnectedState('Disconnected');
+            const { setJumpListStatus: _setStatus } = require('./utils/jumplist');
+            _setStatus('disconnected');
 
             if (profile.killSwitchEnabled) {
                 if (intentional) {
@@ -209,6 +224,8 @@ ipcMain.on('connection-start', async (event, args) => {
             appendToLog(pid, `Hook: connecting...`);
             event.sender.send('connection-changed', connectionStates.connecting);
             tray.setConnectingState(`Connecting to ${profile.server.label}...`);
+            const { setJumpListStatus } = require('./utils/jumplist');
+            setJumpListStatus('connecting', profile.vpnType, profile.server.label);
         },
         errorHook: error => {
             appendToLog(pid, `Hook: ERROR — ${error.message}`);
@@ -460,7 +477,5 @@ ipcMain.on('open-live-help', () => {
 // tray context menu and Windows Jump List stay in sync.
 ipcMain.on('tray-state-update', (_, { profiles, activeProfileId }) => {
     const { tray } = require('./main');
-    const { rebuildJumpList } = require('./utils/jumplist');
     tray?.setProfiles(profiles, activeProfileId);
-    rebuildJumpList(profiles);
 });
