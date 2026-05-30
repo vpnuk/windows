@@ -393,12 +393,14 @@ class WindowsVpn extends VpnBase {
         // without any UI interaction.
         this.#log(`VPN-CONNECT using Connect-VpnConnection for IKEv2 "${this._name}" (timeout=${timeoutMs}ms)`);
 
-        const esc = s => s.replace(/'/g, "''");
+        // Credentials were pre-stored by #storeIkev2Credentials() via
+        // Set-VpnConnectionUsernamePassword.  Connect-VpnConnection (VpnClient
+        // module) finds them in the profile's credential vault — unlike rasdial
+        // which uses a different lookup path and returns 703.  Do NOT pass
+        // -Credential: it fails on some Windows versions and the stored creds
+        // are already correct.
         const psScript = [
-            `$ErrorActionPreference = 'Stop'`,
-            `$secPass = ConvertTo-SecureString '${esc(this._credentials.password)}' -AsPlainText -Force`,
-            `$cred = New-Object pscredential('${esc(this._credentials.login)}', $secPass)`,
-            `Connect-VpnConnection -Name '${this._name}' -Credential $cred -PassThru`,
+            `Connect-VpnConnection -Name '${this._name}' -PassThru`,
             `Write-Output 'VPN-CONNECTED'`,
         ].join('; ');
         const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
