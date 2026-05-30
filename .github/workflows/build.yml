@@ -176,6 +176,43 @@ jobs:
             }
           }
 
+
+      - name: Patch latest.yml with post-signing sha512
+        shell: pwsh
+        run: |
+          # Recompute sha512 of the re-signed full installer and rewrite latest.yml
+          # so electron-updater's hash check passes.
+          $yml  = Get-Item ".\release\latest.yml"
+          $exe  = Get-ChildItem ".\release\*.exe" |
+                    Where-Object { $_.Name -notlike "*nsis-web*" -and $_.Name -notlike "*web*" } |
+                    Sort-Object Length -Descending | Select-Object -First 1
+          if (-not $exe) { Write-Warning "No full installer found — skipping latest.yml patch"; exit 0 }
+
+          # Compute SHA-512 as base64
+          $bytes  = [System.IO.File]::ReadAllBytes($exe.FullName)
+          $hash   = [System.Security.Cryptography.SHA512]::Create().ComputeHash($bytes)
+          $sha512 = [Convert]::ToBase64String($hash)
+          $size   = $exe.Length
+
+          # GitHub converts spaces to dots in asset URLs — match that here
+          $urlName = $exe.Name -replace ' ', '.'
+
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $date    = (Get-Date -Format "yyyy-MM-ddTHH:mm:ss.fffZ")
+
+          $newYml = @"
+version: $version
+files:
+  - url: $urlName
+    sha512: $sha512
+    size: $size
+path: $urlName
+sha512: $sha512
+releaseDate: '$date'
+"@
+          $newYml | Set-Content ".\release\latest.yml" -Encoding UTF8
+          Write-Host "Patched latest.yml: url=$urlName  size=$size  sha512=$($sha512.Substring(0,20))..."
+
       - name: Verify installer signatures
         shell: pwsh
         run: |
