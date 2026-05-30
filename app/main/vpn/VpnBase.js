@@ -1,5 +1,8 @@
 const { getLogFileStream } = require('../utils/logs');
 
+const DEFAULT_DNS = { label: 'DNS: Default' };
+const DEFAULT_MTU = { value: '', label: 'MTU: Default' };
+
 class VpnBase {
     constructor(profile, hooks) {
         if (new.target === VpnBase) {
@@ -13,11 +16,12 @@ class VpnBase {
         }
 
         this._name = `VPNUK-${profile.vpnType}`;
-        this.type = profile.vpnType; // todo: convert to command types?
+        this.type = profile.vpnType;
         this._server = profile.server;
         this._credentials = profile.credentials;
-        this._dns = profile.details.dns;
-        this._mtu = profile.details.mtu;
+        // profile.details may be undefined on profiles saved by older builds
+        this._dns = profile.details?.dns ?? DEFAULT_DNS;
+        this._mtu = profile.details?.mtu ?? DEFAULT_MTU;
         this._logStream = getLogFileStream(profile.id);
 
         let { connectedHook, disconnectedHook, connectingHook, errorHook } = hooks;
