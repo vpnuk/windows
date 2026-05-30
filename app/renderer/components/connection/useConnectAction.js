@@ -44,23 +44,22 @@ export function useConnectAction(profile) {
 
         pushStep('Connection initialised\u2026');
 
+        // ── VPN Account: check subscription status before connecting (all protocols) ─
+        if (!profile.accountType || profile.accountType === 'vpn') {
+            const { login, password } = profile.credentials || {};
+            if (login && password) {
+                pushStep('Checking subscription status\u2026');
+                const statusResult = await checkVpnAccountStatus(login, password);
+                if (!statusResult.active) {
+                    ConnectionLogStore.setSubscriptionExpiredWithUrl(renewalUrl(statusResult.subscriptionId));
+                    return;
+                }
+            }
+        }
+
         // ── WireGuard ─────────────────────────────────────────────────────────
         if (vpnType === VpnType.WireGuard.label) {
             setBusy(true);
-
-            // VPN Account: check subscription status via check_status API before fetching config
-            if (!profile.accountType || profile.accountType === 'vpn') {
-                const { login, password } = profile.credentials || {};
-                if (login && password) {
-                    pushStep('Checking subscription status\u2026');
-                    const statusResult = await checkVpnAccountStatus(login, password);
-                    if (!statusResult.active) {
-                        ConnectionLogStore.setSubscriptionExpiredWithUrl(renewalUrl(statusResult.subscriptionId));
-                        setBusy(false);
-                        return;
-                    }
-                }
-            }
 
             let result;
             try {
