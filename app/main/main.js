@@ -1,4 +1,7 @@
 const { app, BrowserWindow, Menu, shell } = require('electron');
+
+// Required for Windows Jump List (setUserTasks) to work.
+app.setAppUserModelId('vpnuk.windows');
 const path = require('path');
 const fsSync = require('fs');
 const AppTray = require('./tray');
