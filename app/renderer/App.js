@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Modal from 'react-modal';
-import { runInAction, toJS } from 'mobx';
+import { autorun, runInAction, toJS } from 'mobx';
 import { observer } from 'mobx-react-lite';
 import { Layout } from 'antd';
 import './app.css';
@@ -34,12 +34,15 @@ let acRetryTimer = null;
 const AC_MAX_RETRIES  = 3;
 const AC_RETRY_DELAY  = 30_000; /* ms */
 
+/* Tray state */
+let trayAutorunDisposer = null;
+let pendingTrayConnectId = null;
+
 function acScheduleRetry() {
     clearTimeout(acRetryTimer);
     acRetryTimer = setTimeout(() => {
-        if (!store?.settings?.autoConnectWaiting) return; /* already connected or cancelled */
+        if (!store?.settings?.autoConnectWaiting) return;
         if (acRetryCount >= AC_MAX_RETRIES) {
-            /* Give up — turn off auto-connect so we don't flood on next launch */
             runInAction(() => {
                 store.settings.autoConnectWaiting = false;
                 store.settings.autoConnect = false;
@@ -57,12 +60,35 @@ function acCancelRetry() {
     acRetryCount = 0;
 }
 
+// ── Tray connect helper ───────────────────────────────────────────────────────
+async function doTrayConnect(profile, gateway) {
+    if (!profile?.server?.host) {
+        // Auto-init server if not set
+        const catalog = Servers.getCatalog(profile.serverType || 'shared');
+        if (catalog.length > 0) {
+            runInAction(() => { profile.server = catalog[0]; });
+        }
+    }
+    if (!profile?.server?.host) return;
+
+    const plainProfile = toJS(profile);
+    const plainWvpn    = toJS(WvpnOptions);
+
+    if (plainProfile.vpnType === 'WireGuard') {
+        const result = await ensureWgConfig(plainProfile, () => {}).catch(() => ({ success: false }));
+        if (!result.success) return;
+        runInAction(() => { profile.wgConfigFetched = !profile.wgConfigFetched; });
+    }
+
+    ipcRenderer.send('connection-start', { profile: plainProfile, gateway, wVpnOptions: plainWvpn });
+}
+
 // ─── Startup ─────────────────────────────────────────────────────────────────
 
 const App = observer(() => {
     const [ready, setReady] = useState(false);
     const [forceUpdateInfo, setForceUpdateInfo] = useState(null);
-    const [startError, setStartError] = useState(null); // null | 'warning' | 'error'
+    const [startError, setStartError] = useState(null);
     const [startMessage, setStartMessage] = useState('Starting...');
     const [notification, setNotification] = useState(null);
 
@@ -88,29 +114,43 @@ const App = observer(() => {
                     WvpnOptions.ipseckey = catalog.ipseckey;
                 });
 
-                // Trigger WireGuard installer if needed
                 if (catalog.wgInstaller) {
                     ipcRenderer.send('wg-update-request', { installer: catalog.wgInstaller });
                 }
 
                 setReady(true);
 
-                // Auto-connect after ready if enabled
+                // ── Tray profile sync ─────────────────────────────────────────
+                // Keep the main-process tray menu and Jump List in sync with the
+                // MobX profile store.  Re-runs automatically whenever any profile
+                // label/type changes or the active profile changes.
+                if (trayAutorunDisposer) trayAutorunDisposer();
+                trayAutorunDisposer = autorun(() => {
+                    const allProfiles = Object.keys(innerStore.profiles.profiles).flatMap(vt =>
+                        innerStore.profiles.profiles[vt].map(p => ({
+                            id:      p.id,
+                            label:   p.label,
+                            vpnType: p.vpnType,
+                        }))
+                    );
+                    ipcRenderer.send('tray-state-update', {
+                        profiles:        allProfiles,
+                        activeProfileId: innerStore.settings.profileId,
+                    });
+                });
+
                 if (innerStore.settings.autoConnect) {
                     setTimeout(() => {
                         ipcRenderer.send('default-gateway-request');
                     }, 500);
                 }
 
-                // If waiting for internet when the OS reports online, retry gateway check
                 window.addEventListener('online', () => {
                     if (store?.settings?.autoConnect && store?.settings?.autoConnectWaiting) {
                         ipcRenderer.send('default-gateway-request');
                     }
                 }, { once: false });
 
-                // Run OpenVPN update check AFTER initializeCatalogs has written
-                // the current versions.json — avoids false "update available" on first run
                 ovpnCheckUpdate();
                 scheduler.schedule('ovpn-check-update', ovpnCheckUpdate, 72 * HOUR_MS);
             })
@@ -130,6 +170,10 @@ const App = observer(() => {
         ipcRenderer.send('default-gateway-request');
         ipcRenderer.send('ipv6-fix');
         ipcRenderer.send('auto-update-enable');
+
+        return () => {
+            if (trayAutorunDisposer) { trayAutorunDisposer(); trayAutorunDisposer = null; }
+        };
     }, []);
 
     // Show notification from main process
@@ -261,13 +305,23 @@ ipcRenderer.on('default-gateway-response', (_, arg) => {
         ConnectionStore.gateway = arg;
     });
 
+    // ── Pending tray connect ──────────────────────────────────────────────────
+    if (pendingTrayConnectId && arg) {
+        const connectId = pendingTrayConnectId;
+        pendingTrayConnectId = null;
+        for (const vt of Object.keys(store.profiles.profiles)) {
+            const p = store.profiles.profiles[vt].find(pr => pr.id === connectId);
+            if (p) { doTrayConnect(p, arg); break; }
+        }
+        return; // don't fall through to auto-connect logic
+    }
+
+    // ── Auto connect ──────────────────────────────────────────────────────────
     if (store?.settings?.autoConnect && ConnectionStore.state === 'Disconnected') {
         if (arg) {
-            // Internet is up — connect and clear any waiting/retry state
             acCancelRetry();
             runInAction(() => { store.settings.autoConnectWaiting = false; });
             const profile = store.profiles.currentProfile;
-            // Auto-init server (same guard as useConnectAction)
             if (profile && !profile.server?.host) {
                 const catalog = Servers.getCatalog(profile.serverType || 'shared');
                 if (catalog.length > 0) {
@@ -275,15 +329,10 @@ ipcRenderer.on('default-gateway-response', (_, arg) => {
                 }
             }
             if (profile?.server?.host) {
-                // Snapshot MobX observables to plain objects before sending over IPC
-                // (mirrors useConnectAction which uses toJS throughout).
                 const plainProfile = toJS(profile);
                 const plainWvpn    = toJS(WvpnOptions);
 
                 const doAutoConnect = async () => {
-                    // WireGuard requires a fresh config from the API before connecting.
-                    // useConnectAction calls ensureWgConfig for this — we must do the same,
-                    // otherwise connection-start fires with no .conf file and fails silently.
                     if (plainProfile.vpnType === 'WireGuard') {
                         const result = await ensureWgConfig(plainProfile, () => {}).catch(err => ({
                             success: false, error: err.message
@@ -292,7 +341,6 @@ ipcRenderer.on('default-gateway-response', (_, arg) => {
                             isDev && console.error('auto-connect WG config failed:', result.error);
                             return;
                         }
-                        // Mirror the wgConfigFetched toggle so WireGuardDetails re-renders
                         runInAction(() => { profile.wgConfigFetched = !profile.wgConfigFetched; });
                     }
 
@@ -306,7 +354,6 @@ ipcRenderer.on('default-gateway-response', (_, arg) => {
                 doAutoConnect();
             }
         } else {
-            // No gateway yet — show the waiting modal and schedule a retry
             runInAction(() => { store.settings.autoConnectWaiting = true; });
             acScheduleRetry();
         }
@@ -323,6 +370,39 @@ ipcRenderer.on('connection-changed', (_, arg) => {
         }
     });
 });
+
+// ── Tray connect / disconnect triggered by tray menu click ────────────────────
+
+ipcRenderer.on('tray-connect', (_, { profileId }) => {
+    if (!store) return;
+    // Find the profile across all vpnTypes
+    let found = null;
+    for (const vt of Object.keys(store.profiles.profiles)) {
+        const p = store.profiles.profiles[vt].find(pr => pr.id === profileId);
+        if (p) { found = { profile: p, vpnType: vt }; break; }
+    }
+    if (!found) return;
+
+    // Switch the UI to the correct vpnType and profile
+    runInAction(() => {
+        store.settings.vpnType = found.vpnType;
+        store.settings.profileId = profileId;
+    });
+
+    const gateway = ConnectionStore.gateway;
+    if (gateway) {
+        doTrayConnect(found.profile, gateway);
+    } else {
+        pendingTrayConnectId = profileId;
+        ipcRenderer.send('default-gateway-request');
+    }
+});
+
+ipcRenderer.on('tray-disconnect', () => {
+    ipcRenderer.send('connection-stop');
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 ipcRenderer.on('ovpn-update-response', async (event, arg) => {
     isDev && console.log('ovpn-update-response', arg);
