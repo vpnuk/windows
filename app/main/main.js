@@ -1,8 +1,9 @@
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, shell } = require('electron');
 const path = require('path');
 const fsSync = require('fs');
 const AppTray = require('./tray');
 const { enableAutoUpdate } = require("./updater");
+const { rebuildJumpList } = require('./utils/jumplist');
 const ElectronStore = require('electron-store');
 ElectronStore.initRenderer();
 
@@ -10,7 +11,48 @@ const isDev = process.env.ELECTRON_ENV === 'Dev';
 exports.isDev = isDev;
 const isIde = process.env.ELECTRON_IDE && true;
 
+const TAWK_URL  = 'https://tawk.to/chat/56bae5de496019e65d794d8f/default';
+const VPNUK_URL = 'https://www.vpnuk.net';
+
 let window, tray;
+let taskbarVisible = true;
+
+function showWindow() {
+    if (!window) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+}
+
+function toggleTaskbar() {
+    taskbarVisible = !taskbarVisible;
+    window?.setSkipTaskbar(!taskbarVisible);
+    tray?.setInTaskbar(taskbarVisible);
+}
+
+// ── Handle command-line args from the Windows Jump List ──────────────────────
+// Jump List tasks launch a new process; second-instance event forwards the
+// argv to the already-running instance, which calls this function again.
+function handleJumpListArgs(argv) {
+    if (argv.includes('--show')) {
+        showWindow();
+        return;
+    }
+    if (argv.includes('--live-help')) {
+        shell.openExternal(TAWK_URL);
+        return;
+    }
+    if (argv.includes('--visit-vpnuk')) {
+        shell.openExternal(VPNUK_URL);
+        return;
+    }
+    const connectArg = argv.find(a => a.startsWith('--connect-profile='));
+    if (connectArg) {
+        const profileId = connectArg.slice('--connect-profile='.length);
+        showWindow();
+        window?.webContents?.send('tray-connect', { profileId });
+    }
+}
 
 function createWindow() {
     window = new BrowserWindow({
@@ -53,7 +95,7 @@ function createWindow() {
     });
     exports.window = window;
 
-    !isDev && window.removeMenu()
+    !isDev && window.removeMenu();
     isDev && window.webContents.openDevTools();
     window.loadURL(isIde
         ? 'http://localhost:3000/'
@@ -88,24 +130,18 @@ function createWindow() {
     });
 }
 
-const gotTheLock = app.requestSingleInstanceLock()
+const gotTheLock = app.requestSingleInstanceLock();
 
 if (gotTheLock) {
     isIde && app.commandLine.appendSwitch('remote-debugging-port', '9223');
-    app.on('second-instance', (event, commandLine, workingDirectory) => {
-        if (window) {
-            if (window.isMinimized()) window.restore()
-            window.show()
-            window.focus()
-        }
-    })
+
+    app.on('second-instance', (event, commandLine) => {
+        handleJumpListArgs(commandLine);
+        showWindow();
+    });
 
     app.on('ready', () => {
         // ── Kill-switch crash recovery ────────────────────────────────────────
-        // If the app was killed or crashed while the kill switch was active the
-        // default route was left deleted and the user has no internet access.
-        // Check the persisted state file and restore the route before doing
-        // anything else, then re-enable IPv6.
         try {
             const { settingsFolder } = require('../modules/constants');
             const { addRouteSync, defaultRoute, enableAllIPv6 } = require('./utils/routing');
@@ -116,19 +152,15 @@ if (gotTheLock) {
                     addRouteSync(defaultRoute, ks.gateway, defaultRoute);
                     enableAllIPv6();
                 }
-                // Clear the active flag — we are starting fresh.
                 fsSync.writeFileSync(ksPath, JSON.stringify({ active: false }), 'utf-8');
             }
-        } catch { /* best-effort — file may not exist on first run */ }
+        } catch { /* best-effort */ }
 
         // ── WireGuard orphan cleanup ──────────────────────────────────────────
-        // Clean up any WireGuard tunnel services left over from a previous
-        // session (crash, force-close, etc.) before the UI loads.
         try {
-            const { cleanupOrphanedTunnels } = require('./vpn/WireGuard');
-            const { checkWireGuardInstalled } = require('./vpn/WireGuard');
+            const { cleanupOrphanedTunnels, checkWireGuardInstalled } = require('./vpn/WireGuard');
             if (checkWireGuardInstalled()) {
-                const cp   = require('child_process');
+                const cp = require('child_process');
                 const regResult = cp.spawnSync(
                     'cmd',
                     ['/c', 'reg', 'query', 'HKLM\\SOFTWARE\\WireGuard', '/v', 'InstallationDirectory'],
@@ -143,9 +175,28 @@ if (gotTheLock) {
             }
         } catch { /* best-effort */ }
 
+        // Handle Jump List args passed directly on first launch.
+        handleJumpListArgs(process.argv);
+
         createWindow();
-        tray = new AppTray(() => { window.show(); window.focus(); });
+
+        // ── System tray ───────────────────────────────────────────────────────
+        tray = new AppTray({
+            onShow:          () => showWindow(),
+            onConnect:       (profileId) => {
+                showWindow();
+                window?.webContents?.send('tray-connect', { profileId });
+            },
+            onDisconnect:    () => {
+                const { disconnectVpn } = require('./handlers');
+                disconnectVpn();
+            },
+            onToggleTaskbar: () => toggleTaskbar(),
+        });
         exports.tray = tray;
+
+        // Initial empty Jump List — rebuilt when renderer sends tray-state-update.
+        rebuildJumpList([]);
     });
 
     app.on('window-all-closed', () => {
