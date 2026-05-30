@@ -234,6 +234,8 @@ class WindowsVpn extends VpnBase {
             await this.#setIkev2EapConfig();
             this.#log('IKEv2 — setting explicit IPsec cipher suite (AES-256/SHA-256/DH-14)');
             await this.#setIkev2IpsecConfig();
+            this.#log('IKEv2 — storing EAP credentials in Credential Manager');
+            await this.#storeIkev2Credentials();
         }
 
         return result;
@@ -299,6 +301,25 @@ class WindowsVpn extends VpnBase {
             this.#log(`IKEv2-IPSEC result: ${result?.trim() || '(none)'}`);
         } catch (err) {
             this.#log(`IKEv2-IPSEC config error (non-fatal): ${err.message}`);
+        }
+    }
+
+    async #storeIkev2Credentials() {
+        // EAP-MSCHAPv2 (type 26) requires credentials pre-stored in Windows
+        // Credential Manager — rasdial ignores inline username/password for EAP
+        // connections and returns error 703 if no stored creds exist.
+        const cmd =
+            `Set-VpnConnectionUsernamePassword` +
+            ` -ConnectionName '${this._name}'` +
+            ` -UserName '${this._credentials.login}'` +
+            ` -Password '${this._credentials.password}'` +
+            ` -ErrorAction SilentlyContinue;` +
+            ` Write-Output "CREDS-SET"` ;
+        try {
+            const result = await this.#logSpawn('powershell', ['-Command', cmd]);
+            this.#log(`IKEv2-CREDS result: ${result?.trim() || '(none)'}`);
+        } catch (err) {
+            this.#log(`IKEv2-CREDS error (non-fatal): ${err.message}`);
         }
     }
 
@@ -369,11 +390,12 @@ class WindowsVpn extends VpnBase {
         const TIMEOUT_MS = 45_000;
 
         this.#log(`VPN-CONNECT using rasdial for ${this.type} "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
-        const child = cp.spawn('rasdial', [
-            this._name,
-            this._credentials.login,
-            this._credentials.password,
-        ], { shell: true });
+        // EAP (IKEv2): credentials pre-stored via Set-VpnConnectionUsernamePassword;
+        // rasdial ignores inline creds for EAP and returns error 703 if passed.
+        const rasArgs = this.type === VpnType.IKEv2.label
+            ? [this._name]
+            : [this._name, this._credentials.login, this._credentials.password];
+        const child = cp.spawn('rasdial', rasArgs, { shell: true });
 
         return new Promise((resolve, reject) => {
             let stdout = '';
