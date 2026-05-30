@@ -206,17 +206,22 @@ class WindowsVpn extends VpnBase {
             ? (this._server.dns || this._server.host)
             : this._server.host;
 
-        this.#log(`ADD-CONNECTION TunnelType=${this.type} ServerAddress=${serverAddress} AuthMethod=Eap SplitTunneling=False`);
+        this.#log(`ADD-CONNECTION TunnelType=${this.type} ServerAddress=${serverAddress} AuthMethod=Eap SplitTunneling=false`);
 
-        const result = await this.#logSpawn('powershell', [
+        // Pass as a single -Command string so PowerShell evaluates $false as a
+        // boolean — passing args as an array through cmd.exe shell turns $false
+        // into a literal positional argument, which lands on EncryptionLevel.
+        const cmd = [
             'Add-VpnConnection',
-            '-Name', this._name,
-            '-TunnelType', this.type,
-            '-ServerAddress', serverAddress,
-            '-AuthenticationMethod Eap',
-            '-SplitTunneling $False',
-            '-Force -RememberCredential -PassThru'
-        ]);
+            `-Name '${this._name}'`,
+            `-TunnelType ${this.type}`,
+            `-ServerAddress ${serverAddress}`,
+            `-AuthenticationMethod Eap`,
+            `-SplitTunneling:$false`,
+            `-Force -RememberCredential -PassThru`,
+        ].join(' ');
+
+        const result = await this.#logSpawn('powershell', ['-Command', cmd]);
 
         this.#log(`ADD-CONNECTION output: ${result?.trim() || '(none)'}`);
 
