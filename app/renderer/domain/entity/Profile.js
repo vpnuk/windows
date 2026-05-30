@@ -22,6 +22,9 @@ class Profile {
     // { id, status, isDedicated, type }
     userSubscription = null;
 
+    // Full list from /subscriptions API — populated on sign-in, shown in UI
+    userSubscriptions = [];
+
     serverType = 'shared';
     server = {
         host: '',
