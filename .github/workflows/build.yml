@@ -156,24 +156,31 @@ jobs:
           $exes = @(Get-ChildItem .\release\*.exe) +
                   @(Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)
           if (-not $exes) { Write-Warning "No installer .exe found"; exit 0 }
+          $first = $true
           foreach ($exe in $exes) {
+            if (-not $first) { Write-Host "Waiting 30s before next sign..."; Start-Sleep -Seconds 30 }
+            $first = $false
             Write-Host "Signing installer: $($exe.FullName)"
-            $p = Start-Process `
-              -FilePath    $env:CST_BAT `
-              -ArgumentList @(
-                "sign",
-                "-username=$env:ESIGNER_USERNAME",
-                "-password=$env:ESIGNER_PASSWORD",
-                "-credential_id=$env:ESIGNER_CREDENTIAL_ID",
-                "-totp_secret=$env:ESIGNER_TOTP_SECRET",
-                "-input_file_path=`"$($exe.FullName)`"",
-                "-override=true"
-              ) `
-              -WorkingDirectory $env:CST_DIR `
-              -Wait -PassThru -NoNewWindow
-            if ($p.ExitCode -ne 0) {
-              throw "Signing failed for $($exe.Name) (exit $($p.ExitCode))"
+            $signed = $false
+            for ($attempt = 1; $attempt -le 3; $attempt++) {
+              $p = Start-Process `
+                -FilePath    $env:CST_BAT `
+                -ArgumentList @(
+                  "sign",
+                  "-username=$env:ESIGNER_USERNAME",
+                  "-password=$env:ESIGNER_PASSWORD",
+                  "-credential_id=$env:ESIGNER_CREDENTIAL_ID",
+                  "-totp_secret=$env:ESIGNER_TOTP_SECRET",
+                  "-input_file_path=`"$($exe.FullName)`"",
+                  "-override=true"
+                ) `
+                -WorkingDirectory $env:CST_DIR `
+                -Wait -PassThru -NoNewWindow
+              if ($p.ExitCode -eq 0) { $signed = $true; break }
+              Write-Host "Attempt $attempt failed (exit $($p.ExitCode)) — retrying in 30s..."
+              Start-Sleep -Seconds 30
             }
+            if (-not $signed) { throw "Signing failed for $($exe.Name) after 3 attempts" }
           }
 
 
