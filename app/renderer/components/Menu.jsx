@@ -87,7 +87,7 @@ const Menu = observer(() => {
             <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
                 <input
                     className="form-input"
-                    placeholder="New profile name\u2026"
+                    placeholder={"New profile name\u2026"}
                     value={newName}
                     onChange={e => setNewName(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleCreate()}
