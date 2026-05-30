@@ -4,6 +4,13 @@ on:
   push:
     branches: [ master, main ]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish as live release (clean filenames, v1.3.x tag, not a draft)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
 
 jobs:
   release:
@@ -197,23 +204,34 @@ jobs:
             release/nsis-web/*.7z
           retention-days: 7
 
-      - name: Create draft release
+      - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           $build   = "${{ github.run_number }}"
-          $tag     = "v$version-build$build"
-          $title   = "VPNUK $version (build $build)"
+          $publish = "${{ github.event.inputs.publish }}" -eq "true"
 
-          foreach ($exe in (Get-ChildItem .\release\*.exe)) {
-            $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
-            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
-          }
-          foreach ($exe in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)) {
-            $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-web-build$build.exe"
-            Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
+          if ($publish) {
+            # Live release — keep electron-builder's clean filenames, publish immediately.
+            $tag   = "v$version"
+            $title = "VPNUK $version"
+            $draft = $false
+          } else {
+            # Dev build — rename with build-number suffix, keep as draft.
+            $tag   = "v$version-build$build"
+            $title = "VPNUK $version (build $build)"
+            $draft = $true
+
+            foreach ($exe in (Get-ChildItem .\release\*.exe)) {
+              $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
+              Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
+            }
+            foreach ($exe in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)) {
+              $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-web-build$build.exe"
+              Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
+            }
           }
 
           $artifacts = @()
@@ -222,7 +240,11 @@ jobs:
           foreach ($f in (Get-ChildItem .\release\nsis-web\*.7z  -ErrorAction SilentlyContinue))  { $artifacts += $f.FullName }
           if (Test-Path ".\release\latest.yml") { $artifacts += (Resolve-Path ".\release\latest.yml").Path }
 
-          Write-Host "Tag: $tag | Title: $title"
+          Write-Host "Tag: $tag | Title: $title | Draft: $draft"
           $artifacts | ForEach-Object { Write-Host "Artifact: $_" }
 
-          gh release create "$tag" --title "$title" --draft --notes "Build $build" @artifacts
+          if ($draft) {
+            gh release create "$tag" --title "$title" --draft --notes "Build $build" @artifacts
+          } else {
+            gh release create "$tag" --title "$title" --notes "VPNUK for Windows v$version" @artifacts
+          }
