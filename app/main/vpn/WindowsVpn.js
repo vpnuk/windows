@@ -399,9 +399,15 @@ class WindowsVpn extends VpnBase {
         // which uses a different lookup path and returns 703.  Do NOT pass
         // -Credential: it fails on some Windows versions and the stored creds
         // are already correct.
+        // Import-Module is required: each PowerShell spawn starts fresh and
+        // VpnClient does not always auto-load in -EncodedCommand sessions even
+        // though Add-VpnConnection (earlier spawn) loaded fine.
+        // Write-Output is conditional on $? so a connect failure is not
+        // mistaken for success.
         const psScript = [
+            `Import-Module VpnClient`,
             `Connect-VpnConnection -Name '${this._name}' -PassThru`,
-            `Write-Output 'VPN-CONNECTED'`,
+            `if ($?) { Write-Output 'VPN-CONNECTED' } else { exit 1 }`,
         ].join('; ');
         const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
         const child = cp.spawn('powershell', ['-NonInteractive', '-EncodedCommand', encoded], { shell: false });
