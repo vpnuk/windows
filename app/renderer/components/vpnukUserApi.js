@@ -27,8 +27,8 @@ const fetchToken = async (email, password) => {
         );
     }
 
-    if (res.status === 200 && res.data?.token) {
-        return { token: res.data.token };
+    if (res.status === 200 && res.data?.access_token) {
+        return { token: res.data.access_token };
     }
 
     // 403 or invalid_grant = wrong credentials or 2FA enabled
