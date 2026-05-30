@@ -137,6 +137,7 @@ ipcMain.on('connection-start', async (event, args) => {
         }
     }
 
+    try {
     vpnConnection = createVpn(profile, {
         connectedHook: async () => {
             appendToLog(pid, `Hook: connected to ${profile.server?.label}`);
@@ -219,7 +220,15 @@ ipcMain.on('connection-start', async (event, args) => {
         }
     }, wVpnOptions);
 
-    await vpnConnection.connect();
+        await vpnConnection.connect();
+    } catch (err) {
+        appendToLog(pid, `FATAL: createVpn/connect threw — ${err.message}`);
+        sendNotification(event.sender, {
+            type: 'error',
+            title: 'Connection Error',
+            message: err.message || String(err)
+        });
+    }
 });
 
 ipcMain.on('connection-stop', async () => {
