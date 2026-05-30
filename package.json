@@ -54,7 +54,8 @@
       "publish": [
         "github"
       ],
-      "publisherName": "ONLINE PRIVACY SERVICES LTD"
+      "publisherName": "ONLINE PRIVACY SERVICES LTD",
+      "sign": "./sign.js"
     },
     "nsis": {
       "oneClick": false,
