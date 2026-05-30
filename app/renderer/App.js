@@ -5,7 +5,7 @@ import { observer } from 'mobx-react-lite';
 import { Layout } from 'antd';
 import './app.css';
 import { modalStyle } from '@styles';
-import { Sidebar, MainPage, UpdateInfo, Starting, ForceUpdateScreen } from '@components';
+import { Sidebar, MainPage, Starting, ForceUpdateScreen } from '@components';
 import {
     checkOvpnUpdates,
     downloadOvpnUpdate,
@@ -28,11 +28,11 @@ const { ensureWgConfig } = require('./components/wgApi');
 
 let isDev, store;
 
-/* Auto-connect retry state — cleared on success or cancel */
+/* Auto-connect retry state */
 let acRetryCount = 0;
 let acRetryTimer = null;
 const AC_MAX_RETRIES  = 3;
-const AC_RETRY_DELAY  = 30_000; /* ms */
+const AC_RETRY_DELAY  = 30_000;
 
 /* Tray state */
 let trayAutorunDisposer = null;
@@ -60,10 +60,8 @@ function acCancelRetry() {
     acRetryCount = 0;
 }
 
-// ── Tray connect helper ───────────────────────────────────────────────────────
 async function doTrayConnect(profile, gateway) {
     if (!profile?.server?.host) {
-        // Auto-init server if not set
         const catalog = Servers.getCatalog(profile.serverType || 'shared');
         if (catalog.length > 0) {
             runInAction(() => { profile.server = catalog[0]; });
@@ -83,14 +81,14 @@ async function doTrayConnect(profile, gateway) {
     ipcRenderer.send('connection-start', { profile: plainProfile, gateway, wVpnOptions: plainWvpn });
 }
 
-// ─── Startup ─────────────────────────────────────────────────────────────────
-
 const App = observer(() => {
     const [ready, setReady] = useState(false);
     const [forceUpdateInfo, setForceUpdateInfo] = useState(null);
     const [startError, setStartError] = useState(null);
     const [startMessage, setStartMessage] = useState('Starting...');
     const [notification, setNotification] = useState(null);
+    const [updateBanner, setUpdateBanner] = useState(null);
+    // updateBanner: null | { version, ready: false, percent } | { version, ready: true }
 
     const innerStore = useStore();
     store = innerStore;
@@ -120,10 +118,6 @@ const App = observer(() => {
 
                 setReady(true);
 
-                // ── Tray profile sync ─────────────────────────────────────────
-                // Keep the main-process tray menu and Jump List in sync with the
-                // MobX profile store.  Re-runs automatically whenever any profile
-                // label/type changes or the active profile changes.
                 if (trayAutorunDisposer) trayAutorunDisposer();
                 trayAutorunDisposer = autorun(() => {
                     const allProfiles = Object.keys(innerStore.profiles.profiles).flatMap(vt =>
@@ -176,7 +170,7 @@ const App = observer(() => {
         };
     }, []);
 
-    // Show notification from main process
+    // In-app notification toasts
     useEffect(() => {
         const handler = (_, msg) => {
             setNotification(msg);
@@ -186,8 +180,31 @@ const App = observer(() => {
         return () => ipcRenderer.removeListener('app-notification', handler);
     }, []);
 
+    // Slim update banner
+    useEffect(() => {
+        const onAvailable = (_, { version }) =>
+            setUpdateBanner({ version, ready: false, percent: 0 });
+        const onProgress = (_, { percent }) =>
+            setUpdateBanner(prev => prev && !prev.ready ? { ...prev, percent } : prev);
+        const onReady = (_, { version }) =>
+            setUpdateBanner({ version, ready: true });
+
+        ipcRenderer.on('auto-update-available', onAvailable);
+        ipcRenderer.on('auto-update-progress',  onProgress);
+        ipcRenderer.on('auto-update-ready',      onReady);
+        return () => {
+            ipcRenderer.removeListener('auto-update-available', onAvailable);
+            ipcRenderer.removeListener('auto-update-progress',  onProgress);
+            ipcRenderer.removeListener('auto-update-ready',     onReady);
+        };
+    }, []);
+
     const [isSidebarVisible, setSidebarVisible] = useState(false);
     const showDrawer = () => setSidebarVisible(true);
+
+    if (forceUpdateInfo) {
+        return <ForceUpdateScreen info={forceUpdateInfo} />;
+    }
 
     if (!ready) {
         return <Starting message={startMessage} type={startError || 'loading'} />;
@@ -195,11 +212,12 @@ const App = observer(() => {
 
     return (
         <div className="App" id="app">
+            {/* In-app notification toast */}
             {notification && (
                 <div style={{ position: 'fixed', top: 12, right: 12, zIndex: 9999, maxWidth: 340 }}>
                     <div className={`app-notification app-notification--${notification.type || 'info'}`}>
                         <span className="app-notification-icon">
-                            {notification.type === 'error' ? '🔴' : notification.type === 'warning' ? '⚠️' : 'ℹ️'}
+                            {notification.type === 'error' ? '\u{1F534}' : notification.type === 'warning' ? '\u26A0\uFE0F' : '\u2139\uFE0F'}
                         </span>
                         <div className="app-notification-body">
                             {notification.title && <h4>{notification.title}</h4>}
@@ -208,21 +226,59 @@ const App = observer(() => {
                     </div>
                 </div>
             )}
-            <Layout style={{ height: "100%" }}>
-                <Sidebar
-                    visible={isSidebarVisible}
-                    setVisible={setSidebarVisible} />
+
+            <Layout style={{ height: '100%' }}>
+                <Sidebar visible={isSidebarVisible} setVisible={setSidebarVisible} />
                 <Layout>
                     <MainPage showDrawer={showDrawer} />
                 </Layout>
             </Layout>
-            <Modal
-                isOpen={innerStore.settings.isModalOpen}
-                closeTimeoutMS={200}
-                style={modalStyle}
-            >
-                <UpdateInfo />
-            </Modal>
+
+            {/* Slim update banner — fixed bottom */}
+            {updateBanner && (
+                <div style={{
+                    position: 'fixed', bottom: 0, left: 0, right: 0, height: 36,
+                    background: '#07111e', borderTop: '1px solid #1a3a5c',
+                    display: 'flex', alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0 14px', zIndex: 9999,
+                    fontSize: 12, color: '#6b9ac4',
+                }}>
+                    {updateBanner.ready ? (
+                        <>
+                            <span style={{ color: '#a0c4e8' }}>
+                                &#x2B06;&#xFE0F;&nbsp; VPNUK v{updateBanner.version} is ready to install
+                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <button
+                                    onClick={() => ipcRenderer.send('update-install')}
+                                    style={{
+                                        background: '#0f3d24', border: '1px solid #1a6b3a',
+                                        borderRadius: 3, color: '#5de09a',
+                                        padding: '2px 12px', fontSize: 11,
+                                        cursor: 'pointer', fontWeight: 600,
+                                    }}
+                                >Restart Now</button>
+                                <button
+                                    onClick={() => setUpdateBanner(null)}
+                                    style={{
+                                        background: 'transparent', border: 'none',
+                                        color: '#3a5a7a', fontSize: 18,
+                                        cursor: 'pointer', lineHeight: 1, padding: 0,
+                                    }}
+                                >&#xD7;</button>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <span>&#x2B07;&#xFE0F;&nbsp; Downloading VPNUK v{updateBanner.version}&hellip;</span>
+                            <span style={{ color: '#3a6a8a', minWidth: 32, textAlign: 'right' }}>
+                                {updateBanner.percent > 0 ? `${Math.round(updateBanner.percent)}%` : ''}
+                            </span>
+                        </>
+                    )}
+                </div>
+            )}
 
             <Modal
                 isOpen={innerStore.settings.autoConnectWaiting}
@@ -241,7 +297,7 @@ const App = observer(() => {
                 }}
             >
                 <div style={{ color: '#d6e4f7' }}>
-                    <div style={{ fontSize: 28, marginBottom: 12 }}>⏳</div>
+                    <div style={{ fontSize: 28, marginBottom: 12 }}>&#x23F3;</div>
                     <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>
                         Auto Connect Enabled
                     </div>
@@ -253,7 +309,13 @@ const App = observer(() => {
                         </span>
                     </div>
                     <button
-                        onClick={() => { acCancelRetry(); runInAction(() => { store.settings.autoConnectWaiting = false; store.settings.autoConnect = false; }); }}
+                        onClick={() => {
+                            acCancelRetry();
+                            runInAction(() => {
+                                store.settings.autoConnectWaiting = false;
+                                store.settings.autoConnect = false;
+                            });
+                        }}
                         style={{
                             background: 'transparent',
                             border: '1px solid #1e2d4a',
@@ -305,7 +367,6 @@ ipcRenderer.on('default-gateway-response', (_, arg) => {
         ConnectionStore.gateway = arg;
     });
 
-    // ── Pending tray connect ──────────────────────────────────────────────────
     if (pendingTrayConnectId && arg) {
         const connectId = pendingTrayConnectId;
         pendingTrayConnectId = null;
@@ -313,10 +374,9 @@ ipcRenderer.on('default-gateway-response', (_, arg) => {
             const p = store.profiles.profiles[vt].find(pr => pr.id === connectId);
             if (p) { doTrayConnect(p, arg); break; }
         }
-        return; // don't fall through to auto-connect logic
+        return;
     }
 
-    // ── Auto connect ──────────────────────────────────────────────────────────
     if (store?.settings?.autoConnect && ConnectionStore.state === 'Disconnected') {
         if (arg) {
             acCancelRetry();
@@ -371,11 +431,8 @@ ipcRenderer.on('connection-changed', (_, arg) => {
     });
 });
 
-// ── Tray connect / disconnect triggered by tray menu click ────────────────────
-
 ipcRenderer.on('tray-connect', (_, { profileId }) => {
     if (!store) return;
-    // Find the profile across all vpnTypes
     let found = null;
     for (const vt of Object.keys(store.profiles.profiles)) {
         const p = store.profiles.profiles[vt].find(pr => pr.id === profileId);
@@ -383,7 +440,6 @@ ipcRenderer.on('tray-connect', (_, { profileId }) => {
     }
     if (!found) return;
 
-    // Switch the UI to the correct vpnType and profile
     runInAction(() => {
         store.settings.vpnType = found.vpnType;
         store.settings.profileId = profileId;
@@ -402,8 +458,6 @@ ipcRenderer.on('tray-disconnect', () => {
     ipcRenderer.send('connection-stop');
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 ipcRenderer.on('ovpn-update-response', async (event, arg) => {
     isDev && console.log('ovpn-update-response', arg);
     runInAction(() => { OvpnOptions.isObfuscateAvailable = false; });
@@ -416,17 +470,6 @@ ipcRenderer.on('ovpn-update-response', async (event, arg) => {
 ipcRenderer.on('ovpn-update-installed', (_, arg) => {
     isDev && console.log('ovpn-update-installed', arg);
     runInAction(() => { OvpnOptions.isObfuscateAvailable = isObfuscateAvailable(); });
-});
-
-ipcRenderer.on('auto-update-info', (_, arg) => {
-    isDev && console.log('auto-update-info', arg);
-    store.settings.update.info = arg;
-    store.settings.toggleModal();
-});
-
-ipcRenderer.on('auto-update-progress', (_, arg) => {
-    isDev && console.log('auto-update-progress', arg);
-    runInAction(() => { store.settings.update.progress = arg; });
 });
 
 ipcRenderer.on('ikev2-cert-installed', (_, arg) => {
