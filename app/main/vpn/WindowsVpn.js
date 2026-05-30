@@ -390,11 +390,11 @@ class WindowsVpn extends VpnBase {
         const TIMEOUT_MS = 45_000;
 
         this.#log(`VPN-CONNECT using rasdial for ${this.type} "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
-        // EAP (IKEv2): credentials pre-stored via Set-VpnConnectionUsernamePassword;
-        // rasdial ignores inline creds for EAP and returns error 703 if passed.
-        const rasArgs = this.type === VpnType.IKEv2.label
-            ? [this._name]
-            : [this._name, this._credentials.login, this._credentials.password];
+        // Pass credentials inline for all tunnel types including IKEv2/EAP.
+        // Set-VpnConnectionUsernamePassword stores to Credential Manager but rasdial
+        // does not reliably find those entries — it returns error 703 (needs interaction).
+        // Inline username/password works correctly for EAP-MSCHAPv2 (type 26).
+        const rasArgs = [this._name, this._credentials.login, this._credentials.password];
         const child = cp.spawn('rasdial', rasArgs, { shell: true });
 
         return new Promise((resolve, reject) => {
