@@ -1,0 +1,845 @@
+{
+  "servers": [
+    {
+      "type": "shared",
+      "address": "109.169.21.98",
+      "location": {
+        "icon": "UK",
+        "city": "Maidenhead",
+        "name": "United Kingdom 32"
+      },
+      "dns": "shared32.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "109.169.25.67",
+      "location": {
+        "icon": "UK",
+        "city": "Maidenhead",
+        "name": "United Kingdom 33"
+      },
+      "dns": "shared33.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "78.129.194.130",
+      "location": {
+        "icon": "UK",
+        "city": "Maidenhead",
+        "name": "United Kingdom 61"
+      },
+      "dns": "shared61.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "109.169.6.2",
+      "location": {
+        "icon": "UK",
+        "city": "Maidenhead",
+        "name": "United Kingdom 55"
+      },
+      "dns": "shared55.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+        {
+      "type": "shared",
+      "address": "84.19.112.207",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 77"
+      },
+      "dns": "shared77.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "84.19.112.215",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 78"
+      },
+      "dns": "shared78.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "195.137.220.8",
+      "location": {
+        "icon": "US",
+        "city": "Atlanta",
+        "name": "United States 1"
+      },
+      "dns": "shared1-us.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "149.154.158.41",
+      "location": {
+        "icon": "US",
+        "city": "New York",
+        "name": "United States 2"
+      },
+      "dns": "shared2-us.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "192.151.148.66",
+      "location": {
+        "icon": "US",
+        "city": "Kansas",
+        "name": "United States 3"
+      },
+      "dns": "shared3-us.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "107.150.39.226",
+      "location": {
+        "icon": "US",
+        "city": "Kansas",
+        "name": "United States 7"
+      },
+      "dns": "shared7-us.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "91.194.84.21",
+      "location": {
+        "icon": "DE",
+        "city": "Dusseldorf",
+        "name": "Germany 1"
+      },
+      "dns": "shared1-de.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+
+    {
+      "type": "shared",
+      "address": "94.126.22.5",
+      "location": {
+        "icon": "CH",
+        "city": "Zurich",
+        "name": "Switzerland 2"
+      },
+      "dns": "shared2-ch.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "45.154.206.248",
+      "location": {
+        "icon": "ES",
+        "city": "Barcelona",
+        "name": "Spain 1"
+      },
+      "dns": "shared1-es.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+
+
+    {
+      "type": "shared",
+      "address": "173.199.71.145",
+      "location": {
+        "icon": "FR",
+        "city": "Paris",
+        "name": "France 2"
+      },
+      "dns": "shared2-fr.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "109.104.153.186",
+      "location": {
+        "icon": "NL",
+        "city": "Amsterdam",
+        "name": "Netherlands 1"
+      },
+      "dns": "shared1-nl.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "83.136.106.220",
+      "location": {
+        "icon": "IT",
+        "city": "Arezzo",
+        "name": "Italy 1"
+      },
+      "dns": "shared1-it.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "185.196.61.153",
+      "location": {
+        "icon": "CA",
+        "city": "Toronto",
+        "name": "Canada 1"
+      },
+      "dns": "shared1-ca.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "185.186.79.57",
+      "location": {
+        "icon": "DK",
+        "city": "Copenhagen",
+        "name": "Denmark 1"
+      },
+      "dns": "shared1-dk.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "193.57.138.121",
+      "location": {
+        "icon": "IE",
+        "city": "Dublin",
+        "name": "Ireland 1"
+      },
+      "dns": "shared1-ie.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "185.186.78.139",
+      "location": {
+        "icon": "SE",
+        "city": "Stokholm",
+        "name": "Sweden 1"
+      },
+      "dns": "shared1-se.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "185.126.239.45",
+      "location": {
+        "icon": "RU",
+        "city": "Moscow",
+        "name": "Russia 1"
+      },
+      "dns": "shared1-ru.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "45.76.176.174",
+      "location": {
+        "icon": "SG",
+        "city": "Singapore",
+        "name": "Singapore 1"
+      },
+      "dns": "shared1-sg.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "45.12.139.233",
+      "location": {
+        "icon": "LU",
+        "city": "Luxembourg",
+        "name": "Luxembourg 1"
+      },
+      "dns": "shared1-lu.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "92.118.205.189",
+      "location": {
+        "icon": "PL",
+        "city": "Warsaw",
+        "name": "Poland 1"
+      },
+      "dns": "shared1-pl.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "45.15.185.6",
+      "location": {
+        "icon": "AU",
+        "city": "Sydney",
+        "name": "Australia 1"
+      },
+      "dns": "shared1-au.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "45.83.21.193",
+      "location": {
+        "icon": "IS",
+        "city": "Reykjavik",
+        "name": "Iceland 1"
+      },
+      "dns": "shared1-is.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "185.213.23.169",
+      "location": {
+        "icon": "NO",
+        "city": "Oslo",
+        "name": "Norway 1"
+      },
+      "dns": "shared1-no.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+
+    {
+      "type": "shared",
+      "address": "45.159.249.96",
+      "location": {
+        "icon": "FI",
+        "city": "Helsinki",
+        "name": "Finland 1"
+      },
+      "dns": "shared1-fi.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+
+        {
+      "type": "shared",
+      "address": "95.164.62.26",
+      "location": {
+        "icon": "BE",
+        "city": "Brussels",
+        "name": "Belgium 1"
+      },
+      "dns": "shared1-be.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "77.91.74.59",
+      "location": {
+        "icon": "IL",
+        "city": "Tel Aviv",
+        "name": "Israel 1"
+      },
+      "dns": "shared1-il.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "27.0.232.207",
+      "location": {
+        "icon": "HK",
+        "city": "Hong Kong",
+        "name": "Hong Kong 1"
+      },
+      "dns": "shared1-hk.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "45.32.49.107",
+      "location": {
+        "icon": "JP",
+        "city": "Tokyo",
+        "name": "Japan 1"
+      },
+      "dns": "shared1-jp.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+
+    {
+      "type": "shared",
+      "address": "46.16.129.101",
+      "location": {
+        "icon": "TH",
+        "city": "Bangkok",
+        "name": "Thailand 1"
+      },
+      "dns": "shared1-th.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+
+    {
+      "type": "shared",
+      "address": "103.97.203.238",
+      "location": {
+        "icon": "IN",
+        "city": "Mumbai",
+        "name": "India 1"
+      },
+      "dns": "shared1-in.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "185.231.233.212",
+      "location": {
+        "icon": "PT",
+        "city": "Lisbon",
+        "name": "Portugal 1"
+      },
+      "dns": "shared1-pt.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "147.78.1.115",
+      "location": {
+        "icon": "MX",
+        "city": "Mexico City",
+        "name": "Mexico 1"
+      },
+      "dns": "shared1-mx.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "185.123.100.17",
+      "location": {
+        "icon": "TR",
+        "city": "Istanbul",
+        "name": "Turkey 1"
+      },
+      "dns": "shared1-tr.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "109.104.155.72",
+      "location": {
+        "icon": "BR",
+        "city": "Sao Paulo",
+        "name": "Brazil 1"
+      },
+      "dns": "shared1-br.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "shared",
+      "address": "147.78.0.153",
+      "location": {
+        "icon": "AE",
+        "city": "Muhadhdhib",
+        "name": "UAE 1"
+      },
+      "dns": "shared1-ae.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+
+    {
+      "type": "dedicated11",
+      "address": "5.133.177.130",
+      "location": {
+        "icon": "UK",
+        "city": "Maidenhead",
+        "name": "United Kingdom 1"
+      },
+      "dns": "uk1.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.113.129",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 4"
+      },
+      "dns": "uk4.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.113.3",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 5"
+      },
+      "dns": "uk5.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.112.3",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 6"
+      },
+      "dns": "uk6.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.112.105",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 7"
+      },
+      "dns": "uk7.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.114.129",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 8"
+      },
+      "dns": "uk8.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.114.3",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 9"
+      },
+      "dns": "uk9.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "109.169.24.131",
+      "location": {
+        "icon": "UK",
+        "city": "Maidenhead",
+        "name": "United Kingdom 14"
+      },
+      "dns": "uk14.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "109.169.30.131",
+      "location": {
+        "icon": "UK",
+        "city": "Maidenhead",
+        "name": "United Kingdom 15"
+      },
+      "dns": "uk15.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "87.117.230.3",
+      "location": {
+        "icon": "UK",
+        "city": "Maidenhead",
+        "name": "United Kingdom 19"
+      },
+      "dns": "uk19.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "87.117.235.130",
+      "location": {
+        "icon": "UK",
+        "city": "Maidenhead",
+        "name": "United Kingdom 20"
+      },
+      "dns": "uk20.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.115.3",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 27"
+      },
+      "dns": "uk27.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.115.129",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 28"
+      },
+      "dns": "uk28.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.116.3",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 29"
+      },
+      "dns": "uk29.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.116.4",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 30"
+      },
+      "dns": "uk30.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.117.1",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 31"
+      },
+      "dns": "uk31.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.117.128",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 32"
+      },
+      "dns": "uk32.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.118.1",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 33"
+      },
+      "dns": "uk33.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.118.128",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 34"
+      },
+      "dns": "uk34.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.119.1",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 35"
+      },
+      "dns": "uk35.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "84.19.119.127",
+      "location": {
+        "icon": "UK",
+        "city": "Nottingham",
+        "name": "United Kingdom 36"
+      },
+      "dns": "uk36.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "83.138.12.2",
+      "location": {
+        "icon": "IE",
+        "city": "Dublin",
+        "name": "Ireland 2"
+      },
+      "dns": "ie2.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "69.197.175.58",
+      "location": {
+        "icon": "US",
+        "city": "Kansas",
+        "name": "United States 1"
+      },
+      "dns": "us1.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+   
+    {
+      "type": "dedicated",
+      "address": "62.210.206.240",
+      "location": {
+        "icon": "FR",
+        "city": "Paris",
+        "name": "France 1"
+      },
+      "dns": "fr1.vpnuk.net",
+      "speed": "1gbps",
+      "port": "9443",
+      "scheme": "http"
+    },
+    {
+      "type": "dedicated",
+      "address": "95.141.34.2",
+      "location": {
+        "icon": "IT",
+        "city": "Milan",
+        "name": "Italy 1"
+      },
+      "dns": "it1.vpnuk.net",
+      "speed": "gbps",
+      "port": "9443",
+      "scheme": "http"
+    }
+  ]
+}
