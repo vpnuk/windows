@@ -30,6 +30,11 @@ const dowloadJson = (link, filePath) =>
         .catch(error => console.log('error', error));
 
 const downloadPatchedOvpnExe = links => {
+    // No obfuscation patch available for arm64 yet — skip silently.
+    // arm64 Windows can still use standard OpenVPN (no obfuscation mode).
+    if (process.arch === 'arm64' && !links.win_arm64) {
+        return Promise.resolve(false);
+    }
     let link = getLinkByArch(links);
     if (fs.existsSync(settingsPath.ovpnBinFolder)) {
         fs.rmdirSync(settingsPath.ovpnBinFolder, { recursive: true });
@@ -102,8 +107,15 @@ exports.isObfuscateAvailable = isObfuscateAvailable;
 const getVersions = file => fs.existsSync(file)
     ? JSON.parse(fs.readFileSync(file)) : null;
 
-const getLinkByArch = node => process.arch === 'x32'
-    ? node.win32 : node.win64;
+// Returns the download link appropriate for the current CPU architecture.
+//   ia32  (32-bit Windows) → win32
+//   arm64 (Windows on ARM) → win_arm64, falling back to win64
+//   x64   (64-bit Windows) → win64
+const getLinkByArch = node => {
+    if (process.arch === 'ia32')  return node.win32    || node.win64;
+    if (process.arch === 'arm64') return node.win_arm64 || node.win64;
+    return node.win64;
+};
 
 // ─── WireGuard Install Check ──────────────────────────────────────────────────
 
@@ -176,8 +188,25 @@ function initializeCatalogs() {
             return Promise.all(downloads);
         })
         .then(() => {
-            const dnsPath = settingsPath.dns;
+            const dnsPath     = settingsPath.dns;
             const serversPath = settingsPath.servers;
+
+            // First-run / offline fallback: if the fetched cache files are missing,
+            // copy the bundled server list and DNS list from the app bundle.
+            // This lets the app start without an internet connection on first launch.
+            if (!fs.existsSync(serversPath)) {
+                const bundledServers = path.join(__dirname, '../assets/servers-bundled.json');
+                if (fs.existsSync(bundledServers)) {
+                    try { fs.copyFileSync(bundledServers, serversPath); } catch { /* best-effort */ }
+                }
+            }
+            if (!fs.existsSync(dnsPath)) {
+                const bundledDns = path.join(__dirname, '../assets/dns-bundled.json');
+                if (fs.existsSync(bundledDns)) {
+                    try { fs.copyFileSync(bundledDns, dnsPath); } catch { /* best-effort */ }
+                }
+            }
+
             if (!fs.existsSync(dnsPath) || !fs.existsSync(serversPath)) {
                 throw new Error('OFFLINE_NO_CACHE');
             }
