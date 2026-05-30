@@ -3,33 +3,30 @@ const { app } = require('electron');
 const TAWK_URL  = 'https://tawk.to/chat/56bae5de496019e65d794d8f/default';
 const VPNUK_URL = 'https://www.vpnuk.net';
 
-// Rebuild the Windows taskbar right-click Jump List.
-// Called on startup and whenever the profile list changes.
-function rebuildJumpList(profiles) {
+// Module-level state so the Jump List can be rebuilt from any call site.
+let _status  = 'disconnected';
+let _vpnType = '';
+let _server  = '';
+
+function _rebuild() {
+    const dot = _status === 'connected'   ? '●'
+              : _status === 'connecting'  ? '◌'
+              : '○';
+    const parts = [dot];
+    if (_status === 'connected' && _vpnType) parts.push(_vpnType);
+    if (_status === 'connected' && _server)  parts.push(_server);
+    const statusStr = _status === 'connecting' ? '◌ Connecting…'
+                    : parts.join('  ·  ');
+
     const tasks = [
         {
             program:     process.execPath,
             arguments:   '--show',
-            title:       'Show VPNUK',
+            title:       `Show VPNUK  (${statusStr})`,
             description: 'Open the VPNUK app',
             iconPath:    process.execPath,
             iconIndex:   0,
         },
-    ];
-
-    // One "Connect: <profile>" task per profile
-    for (const p of (profiles || [])) {
-        tasks.push({
-            program:     process.execPath,
-            arguments:   `--connect-profile=${p.id}`,
-            title:       `Connect: ${p.label}`,
-            description: `Connect using ${p.label} (${p.vpnType})`,
-            iconPath:    process.execPath,
-            iconIndex:   0,
-        });
-    }
-
-    tasks.push(
         {
             program:     process.execPath,
             arguments:   '--live-help',
@@ -46,9 +43,22 @@ function rebuildJumpList(profiles) {
             iconPath:    process.execPath,
             iconIndex:   0,
         },
-    );
+    ];
 
-    try { app.setUserTasks(tasks); } catch { /* best-effort — setUserTasks is Windows-only */ }
+    try { app.setUserTasks(tasks); } catch { /* best-effort — Windows only */ }
 }
 
-module.exports = { rebuildJumpList };
+// Call on startup and whenever connection state changes.
+function setJumpListStatus(status, vpnType, server) {
+    _status  = status  || 'disconnected';
+    _vpnType = vpnType || '';
+    _server  = server  || '';
+    _rebuild();
+}
+
+// Kept for backward-compat with startup call in main.js — ignores profiles arg.
+function rebuildJumpList() {
+    _rebuild();
+}
+
+module.exports = { rebuildJumpList, setJumpListStatus };
