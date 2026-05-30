@@ -386,14 +386,62 @@ class WindowsVpn extends VpnBase {
         this.#log(`POST-ROUTE exit: ${r.status}`);
     }
 
+    async #vpnConnectIkev2(timeoutMs) {
+        // IKEv2/EAP: rasdial returns 703 in non-interactive mode regardless of
+        // stored or inline credentials — it requires UI for EAP credential entry.
+        // Connect-VpnConnection -Credential injects EAP credentials correctly
+        // without any UI interaction.
+        this.#log(`VPN-CONNECT using Connect-VpnConnection for IKEv2 "${this._name}" (timeout=${timeoutMs}ms)`);
+
+        const esc = s => s.replace(/'/g, "''");
+        const psScript = [
+            `$ErrorActionPreference = 'Stop'`,
+            `$secPass = ConvertTo-SecureString '${esc(this._credentials.password)}' -AsPlainText -Force`,
+            `$cred = New-Object pscredential('${esc(this._credentials.login)}', $secPass)`,
+            `Connect-VpnConnection -Name '${this._name}' -Credential $cred -PassThru`,
+            `Write-Output 'VPN-CONNECTED'`,
+        ].join('; ');
+        const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
+        const child = cp.spawn('powershell', ['-NonInteractive', '-EncodedCommand', encoded], { shell: false });
+
+        return new Promise((resolve, reject) => {
+            let stdout = '';
+            let stderr = '';
+            child.stdout.on('data', chunk => {
+                const s = chunk.toString();
+                stdout += s;
+                this.#log(`VPN-CONNECT stdout: ${s.trim()}`);
+            });
+            child.stderr.on('data', chunk => {
+                const s = chunk.toString();
+                stderr += s;
+                this.#log(`VPN-CONNECT stderr: ${s.trim()}`);
+            });
+            const timer = setTimeout(() => {
+                this.#log(`VPN-CONNECT IKEv2 timeout after ${timeoutMs}ms — killing process`);
+                child.kill();
+                reject(new Error('VPN connection timed out after 45 seconds'));
+            }, timeoutMs);
+            child.on('close', code => {
+                clearTimeout(timer);
+                this.#log(`VPN-CONNECT IKEv2 process closed — exit code ${code}`);
+                if (stdout.trim()) this._logStream.write(stdout);
+                if (code) reject(new Error(`Connect-VpnConnection exited with error ${code}:\n${stderr}`));
+                else resolve(stdout);
+            });
+        });
+    }
+
     async #vpnConnect() {
         const TIMEOUT_MS = 45_000;
 
+        // IKEv2/EAP: rasdial returns 703 in non-interactive mode — delegate to
+        // Connect-VpnConnection which supports -Credential for EAP connections.
+        if (this.type === VpnType.IKEv2.label) {
+            return this.#vpnConnectIkev2(TIMEOUT_MS);
+        }
+
         this.#log(`VPN-CONNECT using rasdial for ${this.type} "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
-        // Pass credentials inline for all tunnel types including IKEv2/EAP.
-        // Set-VpnConnectionUsernamePassword stores to Credential Manager but rasdial
-        // does not reliably find those entries — it returns error 703 (needs interaction).
-        // Inline username/password works correctly for EAP-MSCHAPv2 (type 26).
         const rasArgs = [this._name, this._credentials.login, this._credentials.password];
         const child = cp.spawn('rasdial', rasArgs, { shell: true });
 
