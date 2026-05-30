@@ -5,21 +5,18 @@ import { connectionStates, VpnType } from '@modules/constants.js';
 import { ConnectionStore, ConnectionLogStore, WvpnOptions } from '@domain';
 
 const { ensureWgConfig } = require('../wgApi');
+const { checkVpnAccountStatus, renewalUrl } = require('../vpnukUserApi');
 
 /**
  * Shared hook that encapsulates the full VPN connect procedure:
  *   1. Push step-log messages appropriate to the VPN type
- *   2. For WireGuard: call ensureWgConfig before handing off
- *   3. Send connection-start IPC
- *   4. Poll ConnectionStore until connected or definitively failed
- *
- * Used by both ConnectionButton (profile/settings page) and
- * ConnectionSwitch (quick-launch home screen) so both surfaces
- * show an identical, live connection log.
+ *   2. For User Account: verify cached subscription is still active
+ *   3. For VPN Account + WireGuard: call check_status before fetching config
+ *   4. For WireGuard: call ensureWgConfig before handing off
+ *   5. Send connection-start IPC
+ *   6. Poll ConnectionStore until connected or definitively failed
  *
  * Returns { startConnect, busy }
- *   startConnect — async fn, call when user initiates a connection
- *   busy         — true while WireGuard config is being fetched (disables UI)
  */
 export function useConnectAction(profile) {
     const [busy, setBusy] = React.useState(false);
@@ -36,11 +33,34 @@ export function useConnectAction(profile) {
 
         const pushStep = (msg) => { if (msg) ConnectionLogStore.pushStep(msg); };
 
+        // ── User Account: verify cached subscription is still active ──────────
+        if (profile.accountType === 'user') {
+            const sub = profile.userSubscription;
+            if (!sub || sub.status !== 'active') {
+                ConnectionLogStore.setSubscriptionExpiredWithUrl(renewalUrl(sub?.id));
+                return;
+            }
+        }
+
         pushStep('Connection initialised\u2026');
 
         // ── WireGuard ─────────────────────────────────────────────────────────
         if (vpnType === VpnType.WireGuard.label) {
             setBusy(true);
+
+            // VPN Account: check subscription status via check_status API before fetching config
+            if (!profile.accountType || profile.accountType === 'vpn') {
+                const { login, password } = profile.credentials || {};
+                if (login && password) {
+                    pushStep('Checking subscription status\u2026');
+                    const statusResult = await checkVpnAccountStatus(login, password);
+                    if (!statusResult.active) {
+                        ConnectionLogStore.setSubscriptionExpiredWithUrl(renewalUrl(statusResult.subscriptionId));
+                        setBusy(false);
+                        return;
+                    }
+                }
+            }
 
             let result;
             try {
@@ -60,7 +80,9 @@ export function useConnectAction(profile) {
                     || lower.includes('disabled')
                     || lower.includes('cancelled');
                 if (isExpired) {
-                    ConnectionLogStore.setSubscriptionExpired();
+                    ConnectionLogStore.setSubscriptionExpiredWithUrl(
+                        renewalUrl(profile.userSubscription?.id ?? null)
+                    );
                 } else {
                     ConnectionLogStore.setError(result.error || 'Could not prepare WireGuard config.');
                 }
@@ -83,7 +105,7 @@ export function useConnectAction(profile) {
             pushStep('Handing off to OpenVPN service\u2026');
         }
 
-        // ── Windows native VPN — IKEv2 ───────────────────────────────────────
+        // ── Windows native VPN — IKEv2 / L2TP ────────────────────────────────
         else {
             if (hasMtu) pushStep('Applying custom MTU settings \u2713');
             if (hasDns) pushStep(`Applying custom DNS (${dnsVal.join(', ')}) \u2713`);

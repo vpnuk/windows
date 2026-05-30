@@ -4,6 +4,7 @@ class ConnectionLogStore {
     steps      = [];
     error      = '';
     isExpired  = false;
+    renewalUrl = '';
 
     constructor() {
         makeAutoObservable(this);
@@ -14,19 +15,26 @@ class ConnectionLogStore {
     }
 
     setError(msg) {
-        this.error     = msg || '';
-        this.isExpired = false;
+        this.error      = msg || '';
+        this.isExpired  = false;
+        this.renewalUrl = '';
     }
 
     setSubscriptionExpired() {
-        this.error     = 'Your VPNUK subscription is no longer active.';
-        this.isExpired = true;
+        this.setSubscriptionExpiredWithUrl('https://www.vpnuk.net/my-account/subscriptions/');
+    }
+
+    setSubscriptionExpiredWithUrl(url) {
+        this.error      = 'Your VPNUK subscription is no longer active.';
+        this.isExpired  = true;
+        this.renewalUrl = url || 'https://www.vpnuk.net/my-account/subscriptions/';
     }
 
     clear() {
-        this.steps     = [];
-        this.error     = '';
-        this.isExpired = false;
+        this.steps      = [];
+        this.error      = '';
+        this.isExpired  = false;
+        this.renewalUrl = '';
     }
 }
 

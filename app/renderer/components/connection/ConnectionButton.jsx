@@ -73,6 +73,9 @@ const ConnectionButton = observer(() => {
     const isConnected = ConnectionStore.state !== connectionStates.disconnected;
     const label       = busy ? 'Preparing\u2026' : isConnected ? 'Disconnect' : 'Connect';
 
+    // Renewal URL: use the one stored in the log store (set with subscription ID when available)
+    const expiredRenewalUrl = ConnectionLogStore.renewalUrl || 'https://www.vpnuk.net/my-account/subscriptions/';
+
     return (
         <div>
             {/* ── Persistent status panel — always visible above the button ── */}
@@ -91,7 +94,7 @@ const ConnectionButton = observer(() => {
                     <strong style={{ display: 'block' }}>{'\u26a0'} Subscription Expired</strong>
                     <span style={{ fontSize: 11 }}>Your VPNUK subscription is no longer active. Renew to continue using the VPN.</span>
                     <button
-                        onClick={() => ipcRenderer.send('open-external', 'https://www.vpnuk.net/my-account/subscriptions/')}
+                        onClick={() => ipcRenderer.send('open-external', expiredRenewalUrl)}
                         style={{
                             marginTop: 4,
                             padding: '5px 12px',

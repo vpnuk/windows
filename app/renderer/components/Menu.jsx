@@ -10,6 +10,7 @@ import {
     OvpnDetails,
     WireGuardDetails,
     ConfigEditor,
+    UserAccountPanel,
 } from '@components';
 import '@components/index.css';
 import { VpnType }         from '@modules/constants.js';
@@ -77,7 +78,7 @@ const Menu = observer(() => {
                                 onChange={action(v => store.settings.profileId = v.id)}
                             />
                         </div>
-                        <button className="icon-btn" onClick={handleDelete} title="Delete profile">×</button>
+                        <button className="icon-btn" onClick={handleDelete} title="Delete profile">&times;</button>
                     </div>
                 </div>
             </div>
@@ -86,7 +87,7 @@ const Menu = observer(() => {
             <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
                 <input
                     className="form-input"
-                    placeholder="New profile name…"
+                    placeholder="New profile name\u2026"
                     value={newName}
                     onChange={e => setNewName(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleCreate()}
@@ -155,7 +156,7 @@ const Menu = observer(() => {
                                     userSelect: 'none',
                                 }}
                             >
-                                ↗ Detach Chat
+                                &uarr; Detach Chat
                             </button>
                         </div>
                         <webview
@@ -194,61 +195,89 @@ const ProfileTab = observer(({ logMsg, setLogMsg }) => {
     const profile = store.profiles.currentProfile;
     const [showPw, setShowPw] = useState(false);
 
+    const isUserAccount = profile.accountType === 'user';
+
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 20 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 14 }}>
 
             {/* Row 1: credentials (narrow) | server selector (wider) */}
             <div style={{ display: 'flex', gap: 10 }}>
                 <div style={{ flex: '0 0 42%', display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    <div className="form-label">Username</div>
-                    <input
-                        className="form-input"
-                        placeholder="login"
-                        autoComplete="username"
-                        value={profile.credentials.login}
-                        onChange={action(e => profile.credentials.login = e.target.value.trim())}
-                    />
-                    <div className="form-label" style={{ marginTop: 20 }}>Password</div>
-                    <div style={{ position: 'relative' }}>
-                        <input
-                            className="form-input"
-                            type={showPw ? 'text' : 'password'}
-                            placeholder="password"
-                            autoComplete="current-password"
-                            value={profile.credentials.password}
-                            onChange={action(e => profile.credentials.password = e.target.value.trim())}
-                            style={{ paddingRight: 30, width: '100%', boxSizing: 'border-box' }}
-                        />
-                        <span
-                            onClick={() => setShowPw(v => !v)}
-                            title={showPw ? 'Hide password' : 'Show password'}
-                            style={{
-                                position: 'absolute',
-                                right: 7,
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                cursor: 'pointer',
-                                userSelect: 'none',
-                                lineHeight: 1,
-                                color: showPw ? '#4a90d9' : '#aaa',
-                                fontSize: 15,
-                            }}
+
+                    {/* ── Account type toggle ─────────────────────────────── */}
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+                        <button
+                            className={`acct-tab${!isUserAccount ? ' acct-tab--active' : ''}`}
+                            onClick={action(() => { profile.accountType = 'vpn'; })}
                         >
-                            {showPw ? (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                                    <line x1="1" y1="1" x2="23" y2="23"/>
-                                </svg>
-                            ) : (
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                    <circle cx="12" cy="12" r="3"/>
-                                </svg>
-                            )}
-                        </span>
+                            VPN Account
+                        </button>
+                        <button
+                            className={`acct-tab${isUserAccount ? ' acct-tab--active' : ''}`}
+                            onClick={action(() => { profile.accountType = 'user'; })}
+                        >
+                            User Account
+                        </button>
                     </div>
+
+                    {/* ── VPN Account credentials ─────────────────────────── */}
+                    {!isUserAccount && (
+                        <>
+                            <div className="form-label">Username</div>
+                            <input
+                                className="form-input"
+                                placeholder="login"
+                                autoComplete="username"
+                                value={profile.credentials.login}
+                                onChange={action(e => profile.credentials.login = e.target.value.trim())}
+                            />
+                            <div className="form-label" style={{ marginTop: 14 }}>Password</div>
+                            <div style={{ position: 'relative' }}>
+                                <input
+                                    className="form-input"
+                                    type={showPw ? 'text' : 'password'}
+                                    placeholder="password"
+                                    autoComplete="current-password"
+                                    value={profile.credentials.password}
+                                    onChange={action(e => profile.credentials.password = e.target.value.trim())}
+                                    style={{ paddingRight: 30, width: '100%', boxSizing: 'border-box' }}
+                                />
+                                <span
+                                    onClick={() => setShowPw(v => !v)}
+                                    title={showPw ? 'Hide password' : 'Show password'}
+                                    style={{
+                                        position: 'absolute',
+                                        right: 7,
+                                        top: '50%',
+                                        transform: 'translateY(-50%)',
+                                        cursor: 'pointer',
+                                        userSelect: 'none',
+                                        lineHeight: 1,
+                                        color: showPw ? '#4a90d9' : '#aaa',
+                                        fontSize: 15,
+                                    }}
+                                >
+                                    {showPw ? (
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                                            <line x1="1" y1="1" x2="23" y2="23"/>
+                                        </svg>
+                                    ) : (
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                            <circle cx="12" cy="12" r="3"/>
+                                        </svg>
+                                    )}
+                                </span>
+                            </div>
+                        </>
+                    )}
+
+                    {/* ── User Account panel ──────────────────────────────── */}
+                    {isUserAccount && <UserAccountPanel profile={profile} />}
                 </div>
+
                 <div style={{ flex: 1, minWidth: 0 }}>
                     <ServerSelector />
                 </div>

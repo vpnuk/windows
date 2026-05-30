@@ -6,10 +6,22 @@ class Profile {
     id = uuid();
     label = 'Label';
     vpnType = 'Type';
+
+    // 'vpn' = direct VPN credentials (default), 'user' = VPNUK portal account
+    accountType = 'vpn';
+
     credentials = {
         login: '',
         password: ''
     };
+
+    // Portal (User Account) email + password — stored separately from VPN credentials
+    userAccount = { email: '', password: '' };
+
+    // Populated after a successful User Account sign-in
+    // { id, status, isDedicated, type }
+    userSubscription = null;
+
     serverType = 'shared';
     server = {
         host: '',
