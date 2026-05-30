@@ -18,15 +18,15 @@ const { ipcRenderer }  = require('electron');
 const { settingsPath } = require('@modules/constants.js');
 
 // ── Log to the profile's log file via the main process ───────────────────────
-// This appends renderer-side diagnostic lines (config fetch, IP check, etc.)
-// into the same .log file that WireGuard/OpenVPN use, so every troubleshooting
-// session is in one place.
 const logToFile = (profileId, line) => {
     if (!profileId) return;
     try { ipcRenderer.send('log-append', { profileId, line }); } catch { /* best-effort */ }
 };
 
+// Primary WireGuard API endpoint.
 const WG_AUTH_URL = 'https://clientcp.vpnuk.info/vpnuk/clients/wg_v2_app_api.php';
+// Fallback proxy — used when the primary is unreachable (network error / timeout).
+const WG_AUTH_FALLBACK_URL = 'https://www.serverlistvault.com/wg/config';
 
 // ── Device label ──────────────────────────────────────────────────────────────
 
@@ -46,7 +46,6 @@ const getDeviceLabel = () => {
 
 // ── Conf-string helpers ───────────────────────────────────────────────────────
 
-// Extract the [Interface] Address IP from a .conf file string.
 const getConfInterfaceIp = confContent => {
     try {
         const match = confContent.match(/^\[Interface\][\s\S]*?^Address\s*=\s*([\d.]+)/m);
@@ -54,7 +53,6 @@ const getConfInterfaceIp = confContent => {
     } catch { return null; }
 };
 
-// Patch Endpoint hostname → IP so WireGuard never needs DNS on connect.
 const patchEndpointToIp = (conf, serverIp) => {
     if (!conf || !serverIp) return conf;
     return conf.replace(
@@ -66,14 +64,12 @@ const patchEndpointToIp = (conf, serverIp) => {
     );
 };
 
-// Inject or replace the MTU line in the [Interface] section.
 const applyMtu = (conf, mtuValue) => {
     if (!mtuValue) return conf;
     if (/^MTU\s*=/m.test(conf)) return conf.replace(/^MTU\s*=.*/m, `MTU = ${mtuValue}`);
     return conf.replace(/(\[Interface\][^\n]*\n)/, `$1MTU = ${mtuValue}\n`);
 };
 
-// Inject or replace the AllowedIPs line in the [Peer] section.
 const applyAllowedIps = (conf, allowedIpsOption) => {
     if (!allowedIpsOption) return conf;
     const raw = allowedIpsOption.isCustom
@@ -85,23 +81,37 @@ const applyAllowedIps = (conf, allowedIpsOption) => {
     return conf.replace(/(\[Peer\][^\n]*\n)/, `$1${line}\n`);
 };
 
-// Inject or replace the DNS line in the [Interface] section.
 const applyDns = (conf, dnsAddresses) => {
     if (!dnsAddresses || !dnsAddresses.length) return conf;
     const dnsLine = `DNS = ${dnsAddresses.join(', ')}`;
     if (/^DNS\s*=/m.test(conf)) return conf.replace(/^DNS\s*=.*/m, dnsLine);
-    // Prefer inserting after the Address line (always in [Interface])
     if (/^Address\s*=/m.test(conf)) return conf.replace(/^(Address\s*=.*)/m, `$1\n${dnsLine}`);
     return conf.replace(/(\[Interface\][^\n]*\n)/, `$1${dnsLine}\n`);
 };
 
-// Read Endpoint IP from a stored .conf file.
 const getConfEndpointIp = confPath => {
     try {
         const content = fs.readFileSync(confPath, 'utf-8');
         const match   = content.match(/^Endpoint\s*=\s*([\d.]+):\d+/m);
         return match ? match[1] : null;
     } catch { return null; }
+};
+
+// ── WireGuard API POST helper ─────────────────────────────────────────────────
+// Tries the primary URL first. If a network-level error occurs (unreachable /
+// timeout), automatically retries against the fallback proxy.
+const postWgApi = async (params, timeout = 15000) => {
+    const opts = {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout,
+        validateStatus: () => true,
+    };
+    try {
+        return await axios.post(WG_AUTH_URL, params.toString(), opts);
+    } catch (primaryErr) {
+        // Primary unreachable — try fallback proxy silently.
+        return axios.post(WG_AUTH_FALLBACK_URL, params.toString(), opts);
+    }
 };
 
 // ── Server API calls ──────────────────────────────────────────────────────────
@@ -116,11 +126,7 @@ const fetchWgConfig = async ({ login, password, serverHost, mtuValue, dnsAddress
         device_label: deviceLabel,
     });
 
-    const response = await axios.post(WG_AUTH_URL, params.toString(), {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        timeout: 15000,
-        validateStatus: () => true,
-    });
+    const response = await postWgApi(params);
 
     if (response.data && response.data.error) {
         return { success: false, error: response.data.error };
@@ -139,7 +145,6 @@ const fetchWgConfig = async ({ login, password, serverHost, mtuValue, dnsAddress
     return { success: false, error: 'Unexpected response from server.' };
 };
 
-// Delete this device's config from a specific server (best-effort).
 const deleteWgConfig = async ({ login, password, serverHost }) => {
     try {
         const params = new URLSearchParams({
@@ -149,11 +154,7 @@ const deleteWgConfig = async ({ login, password, serverHost }) => {
             server:       serverHost || '',
             device_label: getDeviceLabel(),
         });
-        await axios.post(WG_AUTH_URL, params.toString(), {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            timeout: 10000,
-            validateStatus: () => true,
-        });
+        await postWgApi(params, 10000);
     } catch { /* ignore — deletion is best-effort */ }
 };
 
@@ -214,23 +215,10 @@ const ensureWgConfig = async (profile, onStatus) => {
     logToFile(profileId, `[wgApi] existingEndpointIp=${existingEndpointIp || '(none)'}  serverChanged=${serverChanged}`);
 
     // Always fetch a fresh config before every connect for ALL server types.
-    //
-    // Reusing a cached .conf causes a silent handshake failure when the server-side
-    // peer entry has been cleared or rotated since the config was written (server
-    // reboot, slot reallocation, key rotation, etc.).  In that case WireGuard
-    // installs the tunnel (exit 0) but the server no longer recognises the client's
-    // public key, so the handshake never completes and no traffic is routed.
-    //
-    // The fetch adds ~300–500 ms per connect, which is acceptable.  The cached file
-    // is kept on disk as a fallback — if the API is unreachable we still attempt
-    // the connect with whatever keys we have.
     logToFile(profileId, `[wgApi] always fetching fresh config before connect`);
     const needsFetch = true;
     logToFile(profileId, `[wgApi] needsFetch=true (confExists=${confExists} serverChanged=${serverChanged})`);
 
-    // Release old server config slot when switching servers.
-    // For dedicated accounts using shared servers: the PHP now correctly targets
-    // the shared server slot when server= matches a shared IP.
     if (serverChanged && existingEndpointIp) {
         log(`Releasing slot on old server (${existingEndpointIp})\u2026`);
         logToFile(profileId, `[wgApi] Calling delete_config for old endpoint: ${existingEndpointIp}`);
@@ -254,9 +242,6 @@ const ensureWgConfig = async (profile, onStatus) => {
     if (dnsValue.length) log(`Custom DNS (${dnsValue.join(', ')}) applied \u2713`);
 
     // ── Internal IP uniqueness check ──────────────────────────────────────────
-    // Each active WireGuard tunnel on Windows must use a unique internal IP.
-    // If two .conf files share the same Address, Windows refuses the second tunnel.
-    // When a clash is found: free the conflicting slot and regenerate.
     try {
         const newConf  = fs.readFileSync(confPath, 'utf-8');
         const newIp    = getConfInterfaceIp(newConf);
