@@ -454,3 +454,13 @@ ipcMain.on('open-live-help', () => {
     liveHelpWindow.setMenuBarVisibility(false);
     liveHelpWindow.on('closed', () => { liveHelpWindow = null; });
 });
+
+// ─── Tray — profile list sync ──────────────────────────────────────────────────
+// The renderer sends this whenever profiles or the active profile change so the
+// tray context menu and Windows Jump List stay in sync.
+ipcMain.on('tray-state-update', (_, { profiles, activeProfileId }) => {
+    const { tray } = require('./main');
+    const { rebuildJumpList } = require('./utils/jumplist');
+    tray?.setProfiles(profiles, activeProfileId);
+    rebuildJumpList(profiles);
+});

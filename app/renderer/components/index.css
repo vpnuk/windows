@@ -408,3 +408,28 @@
     0%, 100% { filter: drop-shadow(0 0 10px rgba(35,123,231,0.3)); }
     50%       { filter: drop-shadow(0 0 24px rgba(35,123,231,0.7)); }
 }
+
+/* ─── Account type toggle (VPN Account / User Account) ───────────────────── */
+.acct-tab {
+    flex: 1;
+    height: 26px;
+    background: var(--bg-muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: 'Rajdhani', system-ui, sans-serif;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    padding: 0 4px;
+}
+.acct-tab:hover { background: var(--border); color: var(--text); }
+.acct-tab:focus { outline: none; }
+.acct-tab--active {
+    background: var(--primary-d) !important;
+    border-color: var(--primary) !important;
+    color: #fff !important;
+    box-shadow: 0 0 8px rgba(35,123,231,0.35);
+}
