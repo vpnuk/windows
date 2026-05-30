@@ -363,13 +363,12 @@ class WindowsVpn extends VpnBase {
     async #vpnConnect() {
         const TIMEOUT_MS = 45_000;
 
-        this.#log(`VPN-CONNECT using Connect-Vpn for ${this.type} "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
-        const child = cp.spawn('powershell', [
-            'Connect-Vpn',
+        this.#log(`VPN-CONNECT using rasdial for ${this.type} "${this._name}" (timeout=${TIMEOUT_MS}ms)`);
+        const child = cp.spawn('rasdial', [
             this._name,
             this._credentials.login,
             this._credentials.password,
-        ]);
+        ], { shell: true });
 
         return new Promise((resolve, reject) => {
             let stdout = '';
