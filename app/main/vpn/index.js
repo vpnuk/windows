@@ -9,8 +9,6 @@ function createVpn(profile, hooks, wVpnOptions) {
         case VpnType.OpenVPN.label:
             result = new OpenVpn(profile, hooks);
             break;
-        case VpnType.L2TP.label:
-        case VpnType.PPTP.label:
         case VpnType.IKEv2.label:
             result = new WindowsVpn(profile, hooks, wVpnOptions);
             break;
