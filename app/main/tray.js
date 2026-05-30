@@ -26,9 +26,7 @@ const tooltipBase = 'VPNUK';
 class AppTray {
     #tray          = null;
     #onShow        = null;
-    #onConnect     = null;   // (profileId) => void
-    #onDisconnect  = null;   // () => void
-    #onToggleTaskbar = null; // () => void
+    #onToggleTaskbar = null;
 
     // Live state — updated via set* methods, triggers #rebuild()
     #connStatus    = connectionStates.disconnected;
@@ -36,15 +34,12 @@ class AppTray {
     #vpnType       = '';
     #server        = '';
     #externalIp    = '';
-    #profiles      = [];
-    #activeId      = null;
+    #activeLabel   = '';
     #inTaskbar     = true;
 
     constructor({ onShow, onConnect, onDisconnect, onToggleTaskbar } = {}) {
-        this.#tray           = new Tray(icons[connectionStates.disconnected]);
-        this.#onShow         = onShow        || (() => {});
-        this.#onConnect      = onConnect     || (() => {});
-        this.#onDisconnect   = onDisconnect  || (() => {});
+        this.#tray            = new Tray(icons[connectionStates.disconnected]);
+        this.#onShow          = onShow          || (() => {});
         this.#onToggleTaskbar = onToggleTaskbar || (() => {});
         this.#tray.setToolTip(tooltipBase);
         this.#rebuild();
@@ -96,8 +91,8 @@ class AppTray {
 
     // profiles: [{ id, label, vpnType }], activeId: string
     setProfiles(profiles, activeId) {
-        this.#profiles = profiles || [];
-        this.#activeId = activeId || null;
+        const active = (profiles || []).find(p => p.id === activeId);
+        this.#activeLabel = active ? active.label : (profiles?.[0]?.label || '');
         this.#rebuild();
     }
 
@@ -135,57 +130,35 @@ class AppTray {
         const busy = conn || this.#connStatus === connectionStates.connecting;
 
         const dot   = conn ? '●' : busy ? '◌' : '○';
-        const label = conn ? 'CONNECTED' : busy ? 'CONNECTING…' : 'DISCONNECTED';
+        const label = conn ? 'CONNECTED' : busy ? 'CONNECTING\u2026' : 'DISCONNECTED';
 
         const items = [
             { label: `${dot}  ${label}`, enabled: false },
         ];
 
+        if (this.#activeLabel) {
+            items.push({ label: `     ${this.#activeLabel}`, enabled: false });
+        }
         if (busy && this.#vpnType) {
             const detail = this.#server
-                ? `${this.#vpnType}  ·  ${this.#server}`
+                ? `${this.#vpnType}  \u00b7  ${this.#server}`
                 : this.#vpnType;
             items.push({ label: `     ${detail}`, enabled: false });
         }
         if (conn && this.#externalIp) {
             items.push({ label: `     IP: ${this.#externalIp}`, enabled: false });
         }
-        if (!busy) {
-            items.push({ label: '     Not connected', enabled: false });
-        }
 
         items.push({ type: 'separator' });
         return items;
     }
 
-    #profileItems() {
-        const conn = this.#connStatus === connectionStates.connected;
-        const busy = conn || this.#connStatus === connectionStates.connecting;
-
-        if (!this.#profiles.length) {
-            return [{ label: 'No profiles', enabled: false }];
-        }
-
-        return this.#profiles.map(p => {
-            const isActive = p.id === this.#activeId && busy;
-            const action   = isActive ? 'Disconnect' : 'Connect';
-            return {
-                label: `${isActive ? '●  ' : ''}${p.label}  —  ${action}`,
-                click: () => isActive ? this.#onDisconnect() : this.#onConnect(p.id),
-            };
-        });
-    }
-
     #rebuild() {
         const template = [
-            // ── Status header (dark-area equivalent) ─────────────────────────
+            // ── Status header ─────────────────────────────────────────────────
             ...this.#statusItems(),
 
-            // ── Per-profile Connect / Disconnect ─────────────────────────────
-            ...this.#profileItems(),
-            { type: 'separator' },
-
-            // ── App controls ─────────────────────────────────────────────────
+            // ── App controls ──────────────────────────────────────────────────
             { label: 'Show VPNUK', click: () => this.#onShow() },
             {
                 label: this.#inTaskbar ? 'Remove from Taskbar' : 'Show in Taskbar',
@@ -193,7 +166,7 @@ class AppTray {
             },
             { type: 'separator' },
 
-            // ── External links ───────────────────────────────────────────────
+            // ── External links ────────────────────────────────────────────────
             { label: 'Live Help',        click: () => shell.openExternal(TAWK_URL)  },
             { label: 'Visit VPNUK',      click: () => shell.openExternal(VPNUK_URL) },
         ];
