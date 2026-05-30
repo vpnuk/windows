@@ -199,7 +199,7 @@ const ProfileTab = observer(({ logMsg, setLogMsg }) => {
 
             {/* Row 1: credentials (narrow) | server selector (wider) */}
             <div style={{ display: 'flex', gap: 10 }}>
-                <div style={{ flex: '0 0 28%', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <div style={{ flex: '0 0 42%', display: 'flex', flexDirection: 'column', gap: 5 }}>
                     <div className="form-label">Username</div>
                     <input
                         className="form-input"
