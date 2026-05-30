@@ -229,22 +229,16 @@ ipcMain.on('connection-start', async (event, args) => {
         },
         errorHook: error => {
             appendToLog(pid, `Hook: ERROR — ${error.message}`);
-            sendNotification(event.sender, {
-                type: 'error',
-                title: 'Connection Error',
-                message: error.message
-            });
+            // Error detail stays in the log; UI update arrives via disconnectedHook.
         }
     }, wVpnOptions);
 
         await vpnConnection.connect();
     } catch (err) {
         appendToLog(pid, `FATAL: createVpn/connect threw — ${err.message}`);
-        sendNotification(event.sender, {
-            type: 'error',
-            title: 'Connection Error',
-            message: err.message || String(err)
-        });
+        // Raw error stays in the log only — send a clean disconnect so the
+        // renderer shows its own 'Connection failed' message.
+        try { event.sender.send('connection-changed', connectionStates.disconnected); } catch { /* renderer gone */ }
     }
 });
 
