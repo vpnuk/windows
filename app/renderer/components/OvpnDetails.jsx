@@ -4,7 +4,7 @@ import { observer } from 'mobx-react-lite';
 import { Radio } from 'antd';
 import '@components/index.css';
 import { OvpnOptions, useStore } from '@domain';
-import { windowsArch } from '@modules/windows-arch';
+import { windowsArch } from '@modules/windows-arch.js';
 
 const OvpnDetails = observer(() => {
     const details = useStore().profiles.currentProfile.details;

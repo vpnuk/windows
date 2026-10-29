@@ -3,7 +3,7 @@
 // not renderer callbacks that can race tray/auto-connect/disconnect.
 const fs = require('fs');
 const { ipcRenderer } = require('electron');
-const { bypassPrefixes } = require('@modules/ip-bypass');
+const { bypassPrefixes } = require('@modules/ip-bypass.js');
 
 function getConfEndpointIp(file) {
     try { return fs.readFileSync(file, 'utf8').match(/^Endpoint\s*=\s*([\d.]+):\d+/m)?.[1] || null; }

@@ -38,6 +38,15 @@ function load(relative, mocks = {}, globals = {}) {
 
 const arch = require('../app/modules/windows-arch');
 const bypass = require('../app/modules/ip-bypass');
+test('new renderer shared-module imports match the existing exact-file whitelist', () => {
+    const allowed = new Set(fs.readdirSync(path.join(root, 'app/modules')).map(file => path.join(root, 'app/modules', file)));
+    for (const file of ['wgApi.js', 'IpBypassSettings.jsx', 'OvpnDetails.jsx']) {
+        const source = fs.readFileSync(path.join(root, 'app/renderer/components', file), 'utf8');
+        for (const match of source.matchAll(/['"]@modules\/([^'"]+)['"]/g)) {
+            assert(allowed.has(path.join(root, 'app/modules', match[1])), `${file}: shared module import must name the exact whitelisted file`);
+        }
+    }
+});
 test('draft feed names, version, size and hash match the final renamed installer', () => {
     const { writeMetadata } = require('../scripts/update-metadata');
     const folder = temp();

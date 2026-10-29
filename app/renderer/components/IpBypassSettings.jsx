@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { runInAction } from 'mobx';
 import { observer } from 'mobx-react-lite';
 import { useStore } from '@domain';
-import { bypassPrefixes } from '@modules/ip-bypass';
+import { bypassPrefixes } from '@modules/ip-bypass.js';
 
 const IpBypassSettings = observer(() => {
     const store = useStore();
