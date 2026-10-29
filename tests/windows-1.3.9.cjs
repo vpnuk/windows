@@ -27,6 +27,7 @@ function load(relative, mocks = {}, globals = {}) {
     const module = { exports: {} };
     const source = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
         filename, babelrc: false, configFile: false, plugins: [commonjs],
+        parserOpts: { plugins: ['classProperties', 'classPrivateProperties', 'classPrivateMethods'] },
     }).code;
     const context = { module, exports: module.exports, require: id => (
         Object.prototype.hasOwnProperty.call(mocks, id) ? mocks[id] : realRequire(id)
