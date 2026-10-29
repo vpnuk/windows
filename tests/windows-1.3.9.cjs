@@ -26,7 +26,8 @@ function load(relative, mocks = {}, globals = {}) {
     const realRequire = createRequire(filename);
     const module = { exports: {} };
     const source = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
-        filename, babelrc: false, configFile: false, plugins: [commonjs],
+        filename, babelrc: false, configFile: false,
+        plugins: [commonjs, ...(filename.endsWith('.jsx') ? [toolRequire('@babel/plugin-transform-react-jsx')] : [])],
         parserOpts: { plugins: ['classProperties', 'classPrivateProperties', 'classPrivateMethods'] },
     }).code;
     const context = { module, exports: module.exports, require: id => (
@@ -38,6 +39,95 @@ function load(relative, mocks = {}, globals = {}) {
 
 const arch = require('../app/modules/windows-arch');
 const bypass = require('../app/modules/ip-bypass');
+test('split tunnelling expands, preserves drafts, validates and saves comma-separated rules per profile', () => {
+    const { JSDOM } = toolRequire('jsdom');
+    const React = toolRequire('react');
+    const dom = new JSDOM('<!doctype html><div id="test-root"></div>', { pretendToBeVisual: true });
+    const oldGlobals = {};
+    // Use jsdom's browser globals, not Node's worker-thread MessageChannel:
+    // React 17's scheduler otherwise leaves a worker port open after the test.
+    for (const name of ['window', 'document', 'navigator', 'MessageChannel']) {
+        oldGlobals[name] = Object.getOwnPropertyDescriptor(global, name);
+        Object.defineProperty(global, name, { configurable: true, value: dom.window[name] });
+    }
+    const ReactDOM = toolRequire('react-dom');
+    const { act, Simulate } = toolRequire('react-dom/test-utils');
+    const container = dom.window.document.getElementById('test-root');
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollHeight', { get: () => 230 });
+    let saves = 0;
+    const store = {
+        profiles: { currentProfile: { id: 'first', bypassIps: ['192.168.1.10/32'] } },
+        triggerPersist() { saves++; },
+    };
+    class ResizeObserverMock { observe() {} disconnect() {} }
+    const Component = load('app/renderer/components/IpBypassSettings.jsx', {
+        react: React, mobx, 'mobx-react-lite': { observer: component => component },
+        '@domain': { useStore: () => store }, '@modules/ip-bypass.js': bypass,
+    }, { ResizeObserver: ResizeObserverMock }).default;
+    const render = () => act(() => {
+        ReactDOM.render(React.createElement(Component, { key: store.profiles.currentProfile.id }), container);
+    });
+    const toggle = () => container.querySelector('.ip-bypass-toggle');
+    const input = () => container.querySelector('textarea');
+    const change = text => act(() => Simulate.change(input(), { target: { value: text } }));
+    try {
+        render();
+        assert.equal(toggle().textContent, 'SPLIT TUNNELLING — BYPASS IP ADDRESSES');
+        assert.equal(toggle().getAttribute('aria-expanded'), 'false');
+        assert.equal(container.querySelector('.ip-bypass-panel').style.height, '0px');
+        assert.equal(input().tabIndex, -1);
+        act(() => Simulate.click(toggle()));
+        assert.equal(toggle().getAttribute('aria-expanded'), 'true');
+        assert.equal(container.querySelector('.ip-bypass-panel').style.height, '230px');
+        assert.equal(input().rows, 4);
+        assert.equal(input().value, '192.168.1.10/32');
+        assert.equal(container.querySelector('.ip-bypass-description').textContent.trim(),
+            'Comma separated IPs bypass the VPN and Kill Switch.');
+        change('192.168.1.20, 10.0.0.0/8');
+        act(() => Simulate.click(toggle()));
+        act(() => Simulate.click(toggle()));
+        assert.equal(input().value, '192.168.1.20, 10.0.0.0/8', 'closing must preserve unsaved edits');
+        act(() => Simulate.click(container.querySelector('.ip-bypass-save')));
+        assert.deepEqual(json(store.profiles.currentProfile.bypassIps), ['192.168.1.20/32', '10.0.0.0/8']);
+        assert.equal(input().value, '192.168.1.20/32, 10.0.0.0/8');
+        assert.equal(saves, 1);
+        assert(container.querySelector('[role="status"]'));
+        change('example.com');
+        act(() => Simulate.click(container.querySelector('.ip-bypass-save')));
+        assert(container.querySelector('[role="alert"]'));
+        assert.equal(saves, 1, 'invalid rules must not be persisted');
+        change('');
+        act(() => Simulate.click(container.querySelector('.ip-bypass-save')));
+        assert.deepEqual(json(store.profiles.currentProfile.bypassIps), []);
+        assert.equal(saves, 2, 'saving empty rules must clear the bypass list');
+        store.profiles.currentProfile = { id: 'second', bypassIps: ['172.16.0.0/12'] };
+        render();
+        assert.equal(toggle().getAttribute('aria-expanded'), 'false');
+        assert.equal(input().value, '172.16.0.0/12');
+        assert(!container.querySelector('[role="alert"]'));
+        assert(!container.textContent.includes('This is separate from WireGuard Allowed IPs'));
+        assert(!container.textContent.includes('Domains and apps are not included'));
+    } finally {
+        act(() => { ReactDOM.unmountComponentAtNode(container); });
+        dom.window.close();
+        for (const name of Object.keys(oldGlobals)) {
+            if (oldGlobals[name]) Object.defineProperty(global, name, oldGlobals[name]);
+            else delete global[name];
+        }
+    }
+});
+test('split tunnelling uses its own four-row editor instead of single-line input styling', () => {
+    const source = fs.readFileSync(path.join(root, 'app/renderer/components/IpBypassSettings.jsx'), 'utf8');
+    const css = fs.readFileSync(path.join(root, 'app/renderer/components/index.css'), 'utf8');
+    assert(!source.includes('className="form-input"'));
+    const style = css.match(/\.ip-bypass-input\s*\{([^}]+)\}/)[1];
+    for (const rule of ['height: 110px', 'line-height: 22px', 'color: var(--text)', 'border-radius: 8px', 'resize: none']) {
+        assert(style.includes(rule), `missing multiline editor style: ${rule}`);
+    }
+    assert(css.includes('transition: height 0.2s ease'));
+    const menu = fs.readFileSync(path.join(root, 'app/renderer/components/Menu.jsx'), 'utf8');
+    assert(menu.includes('[VpnType.OpenVPN.label, VpnType.WireGuard.label].includes(store.settings.vpnType) && <IpBypassSettings'));
+});
 test('installer quotes the installed OpenVPN path and does not block upgrades on version-query failure', () => {
     const source = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
     const fn = source.match(/Function getOvpnVersion\r?\n([\s\S]*?)FunctionEnd/)[1];
