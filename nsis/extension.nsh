@@ -200,6 +200,17 @@ send:
         ${EndIf} 
 
         ReadRegStr $ovpnPath HKLM SOFTWARE\OpenVPN exe_path
+        ; Some installations store a quoted exe_path. Normalize only the outer
+        ; quotes; preserve spaces and the actual file path.
+        StrCpy $0 $ovpnPath 1
+        ${If} $0 == '$\"'
+            StrCpy $0 $ovpnPath 1 -1
+            ${If} $0 == '$\"'
+                StrLen $1 $ovpnPath
+                IntOp $1 $1 - 2
+                StrCpy $ovpnPath $ovpnPath $1 1
+            ${EndIf}
+        ${EndIf}
         ${If} $ovpnPath != ""
             Call getOvpnVersion ; => $installedOvpnVer
         ${EndIf}
@@ -237,16 +248,34 @@ send:
     FunctionEnd
 
     Function getOvpnVersion
-        nsExec::ExecToStack "$ovpnPath --version"
-        Pop $0
-        Pop $0
-        ${If} $0 != ""
-            ${WordFind2X} $0 "OpenVPN " " " "+1" $1
+        StrCpy $installedOvpnVer ""
+        IfFileExists "$ovpnPath" 0 ovpn_version_missing
+        nsExec::ExecToStack /TIMEOUT=10000 '"$ovpnPath" --version'
+        Pop $R0 ; process exit status (or error/timeout)
+        Pop $R1 ; captured output; do not overwrite the exit status
+        ${If} $R0 == "0"
+        ${AndIf} $R1 != ""
+            ${WordFind2X} $R1 "OpenVPN " " " "+1" $1
             StrCpy $installedOvpnVer $1
-        ${Else}
-            MessageBox MB_OK "Error getting openvpn version:$\n$0"
-            StrCpy $installedOvpnVer ""
         ${EndIf}
+        ${If} $installedOvpnVer == ""
+            DetailPrint "OpenVPN version command unavailable (status $R0); checking the existing file's version resource."
+            ClearErrors
+            GetDLLVersion "$ovpnPath" $R2 $R3
+            ${IfNot} ${Errors}
+                IntOp $R4 $R2 >> 16
+                IntOp $R5 $R2 & 0xFFFF
+                IntOp $R6 $R3 >> 16
+                StrCpy $installedOvpnVer "$R4.$R5.$R6"
+            ${Else}
+                StrCpy $installedOvpnVer "version unavailable"
+                DetailPrint "Keeping the existing OpenVPN option; its version could not be determined."
+            ${EndIf}
+        ${EndIf}
+        Return
+    ovpn_version_missing:
+        DetailPrint "The registered OpenVPN executable is absent; ignoring the stale registry path."
+        StrCpy $ovpnPath ""
     FunctionEnd
 
     Function getFromVerionsJson

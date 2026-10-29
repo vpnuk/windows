@@ -38,6 +38,16 @@ function load(relative, mocks = {}, globals = {}) {
 
 const arch = require('../app/modules/windows-arch');
 const bypass = require('../app/modules/ip-bypass');
+test('installer quotes the installed OpenVPN path and does not block upgrades on version-query failure', () => {
+    const source = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
+    const fn = source.match(/Function getOvpnVersion\r?\n([\s\S]*?)FunctionEnd/)[1];
+    assert(fn.includes('nsExec::ExecToStack /TIMEOUT=10000 \'"$ovpnPath" --version\''));
+    assert(/Pop \$R0[\s\S]*?Pop \$R1/.test(fn));
+    assert(fn.includes('GetDLLVersion "$ovpnPath"'));
+    assert(fn.includes('StrCpy $installedOvpnVer "version unavailable"'));
+    assert(!fn.includes('MessageBox'));
+    assert(!fn.includes('Abort'));
+});
 test('new renderer shared-module imports match the existing exact-file whitelist', () => {
     const allowed = new Set(fs.readdirSync(path.join(root, 'app/modules')).map(file => path.join(root, 'app/modules', file)));
     for (const file of ['wgApi.js', 'IpBypassSettings.jsx', 'OvpnDetails.jsx']) {
