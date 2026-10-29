@@ -125,6 +125,10 @@ test('split tunnelling uses its own four-row editor instead of single-line input
         assert(style.includes(rule), `missing multiline editor style: ${rule}`);
     }
     assert(css.includes('transition: height 0.2s ease'));
+    assert(css.includes('.ip-bypass-toggle:focus { outline: none; box-shadow: none; }'),
+        'mouse clicks must not show the native orange/beige focus outline');
+    assert(css.indexOf('.ip-bypass-toggle:focus-visible,') > css.indexOf('.ip-bypass-toggle:focus {'),
+        'keyboard-only focus must override the mouse-click reset');
     const menu = fs.readFileSync(path.join(root, 'app/renderer/components/Menu.jsx'), 'utf8');
     assert(menu.includes('[VpnType.OpenVPN.label, VpnType.WireGuard.label].includes(store.settings.vpnType) && <IpBypassSettings'));
 });

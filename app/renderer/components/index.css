@@ -142,6 +142,7 @@
     cursor: pointer;
 }
 .ip-bypass-toggle:hover { color: #fff; }
+.ip-bypass-toggle:focus { outline: none; box-shadow: none; }
 .ip-bypass-toggle:focus-visible,
 .ip-bypass-settings .ip-bypass-save:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .ip-bypass-chevron { flex-shrink: 0; transition: transform 0.2s ease; }
