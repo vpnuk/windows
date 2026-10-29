@@ -16,6 +16,7 @@ import '@components/index.css';
 import { VpnType }         from '@modules/constants.js';
 import { Servers, useStore } from '@domain';
 import { isDev }           from '@app';
+import IpBypassSettings from './IpBypassSettings';
 
 const { TabPane }       = Tabs;
 const { ipcRenderer }   = require('electron');
@@ -37,6 +38,7 @@ const Menu = observer(() => {
 
     const [newName, setNewName] = useState('');
     const [logMsg,  setLogMsg]  = useState('');
+    const [saveMessage, setSaveMessage] = useState('');
 
     useEffect(() => {
         const handler = (_, msg) => setLogMsg(msg);
@@ -94,7 +96,14 @@ const Menu = observer(() => {
                     style={{ flex: 1 }}
                 />
                 <button className="form-button-sm" onClick={handleCreate}>+ Create</button>
+                <button className="form-button-sm" onClick={() => {
+                    try {
+                        store.triggerPersist();
+                        setSaveMessage('Profile saved to this PC.');
+                    } catch (error) { setSaveMessage(`Save failed: ${error.message}`); }
+                }}>Save Profile</button>
             </div>
+            {saveMessage && <p role="status">{saveMessage}</p>}
 
             {/* ── Tabs ───────────────────────────────────────────────────── */}
             <Tabs className="menu-tabs" defaultActiveKey="profile" tabBarStyle={{ marginBottom: 0 }}>
@@ -107,6 +116,7 @@ const Menu = observer(() => {
                         <ConnectionDetails />
                         {store.settings.vpnType === VpnType.OpenVPN.label   && <OvpnDetails />}
                         {store.settings.vpnType === VpnType.WireGuard.label && <WireGuardDetails />}
+                        {[VpnType.OpenVPN.label, VpnType.WireGuard.label].includes(store.settings.vpnType) && <IpBypassSettings key={profile.id} />}
                     </div>
                 </TabPane>
 

@@ -49,7 +49,11 @@ exports.settingsPath = {
     ovpnBinExe: path.join(settingsFolder, 'ovpnBin', 'bin', 'openvpn.exe'),
     ikev2Cert: path.join(settingsFolder, 'ikev2.crt'),
     device: path.join(settingsFolder, 'device.json'),
-    wgConf: (serverType, serverDns) => {
+    wgConf: (serverType, serverDns, profileId) => {
+        if (profileId) {
+            if (!/^[a-zA-Z0-9_-]{1,48}$/.test(profileId)) throw new Error('Invalid WireGuard profile identity.');
+            return path.join(settingsFolder, `vpnuk-${profileId}.conf`);
+        }
         const slug = exports.wgConfSlug(serverType, serverDns);
         return path.join(settingsFolder, `${slug}.conf`);
     },

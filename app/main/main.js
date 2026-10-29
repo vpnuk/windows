@@ -116,13 +116,12 @@ function createWindow() {
                     if (result) {
                         window.close();
                     }
-                }).catch(() => {
-                    window.connectionIsOk = true;
-                    window.close();
+                }).catch(error => {
+                    window.show();
+                    require('electron').dialog.showErrorBox('Disconnect failed — VPNUK is still open', error.message);
                 });
             } catch (e) {
-                window.connectionIsOk = true;
-                window.close();
+                require('electron').dialog.showErrorBox('Could not safely close VPNUK', e.message);
             }
         }
     });
@@ -161,22 +160,11 @@ if (gotTheLock) {
 
         // ── WireGuard orphan cleanup ──────────────────────────────────────────
         try {
-            const { cleanupOrphanedTunnels, checkWireGuardInstalled } = require('./vpn/WireGuard');
-            if (checkWireGuardInstalled()) {
-                const cp = require('child_process');
-                const regResult = cp.spawnSync(
-                    'cmd',
-                    ['/c', 'reg', 'query', 'HKLM\\SOFTWARE\\WireGuard', '/v', 'InstallationDirectory'],
-                    { shell: true }
-                );
-                const out   = '' + regResult.stdout;
-                const match = out.match(/InstallationDirectory\s+REG_SZ\s+(.+)/);
-                const wgExe = match
-                    ? path.join(match[1].trim(), 'wireguard.exe')
-                    : 'C:\\Program Files\\WireGuard\\wireguard.exe';
-                cleanupOrphanedTunnels(wgExe);
-            }
-        } catch { /* best-effort */ }
+            require('./vpn/WireGuard').cleanupOrphanedTunnels();
+            require('./utils/bypass-routes').cleanupBypassRoutes();
+        } catch (error) {
+            require('electron').dialog.showErrorBox('VPNUK cleanup needs attention', error.message);
+        }
 
         // Handle Jump List args passed directly on first launch.
         handleJumpListArgs(process.argv);
@@ -192,7 +180,7 @@ if (gotTheLock) {
             },
             onDisconnect:    () => {
                 const { disconnectVpn } = require('./handlers');
-                disconnectVpn();
+                disconnectVpn().catch(error => require('electron').dialog.showErrorBox('Disconnect failed', error.message));
             },
             onToggleTaskbar: () => toggleTaskbar(),
         });

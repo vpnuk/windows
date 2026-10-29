@@ -57,6 +57,9 @@ jobs:
       - name: Install Node dependencies
         run: yarn install --no-frozen-lockfile
 
+      - name: Check Windows feature logic
+        run: yarn test:windows
+
       - name: Build .NET VpnHelper cmdlet
         run: |
           dotnet restore VpnHelper\VpnHelper.csproj
@@ -184,32 +187,25 @@ jobs:
           }
 
 
-      - name: Patch latest.yml with post-signing sha512
+      - name: Finalize asset names and post-signing update metadata
         shell: pwsh
         run: |
-          $exe = Get-ChildItem ".\release\*.exe" |
-            Where-Object { $_.Name -notlike "*web*" -and $_.Name -notlike "*nsis-web*" } |
-            Sort-Object Length -Descending | Select-Object -First 1
-          if (-not $exe) { Write-Warning "No full installer — skipping latest.yml patch"; exit 0 }
-          $bytes  = [System.IO.File]::ReadAllBytes($exe.FullName)
-          $hash   = [System.Security.Cryptography.SHA512]::Create().ComputeHash($bytes)
-          $sha512 = [Convert]::ToBase64String($hash)
-          $size   = $exe.Length
-          $urlName = $exe.Name -replace ' ', '.'
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          $date    = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-          $lines = @(
-            "version: $version",
-            "files:",
-            "  - url: $urlName",
-            "    sha512: $sha512",
-            "    size: $size",
-            "path: $urlName",
-            "sha512: $sha512",
-            "releaseDate: '$date'"
-          )
-          $lines -join "`n" | Set-Content ".\release\latest.yml" -Encoding UTF8
-          Write-Host "Patched latest.yml: $urlName  size=$size  sha512=$($sha512.Substring(0,20))..."
+          $suffix = if ("${{ github.event.inputs.publish }}" -eq "true") { "" } else { "-build${{ github.run_number }}" }
+          $full = @(Get-ChildItem ".\release\*.exe" |
+            Where-Object { $_.Name -notlike "*web*" -and $_.Name -notlike "*nsis-web*" })
+          if ($full.Count -ne 1) { throw "Expected exactly one full installer, found $($full.Count)" }
+          $name = "VPNUK-Setup-$version$suffix.exe"
+          if ($full[0].Name -ne $name) { Rename-Item $full[0].FullName $name }
+          $web = @(Get-ChildItem ".\release\nsis-web\*.exe" -ErrorAction SilentlyContinue)
+          if ($web.Count -gt 1) { throw "Unexpected multiple web installers" }
+          if ($web.Count -eq 1) {
+            $webName = "VPNUK-Web-Setup-$version$suffix.exe"
+            if ($web[0].Name -ne $webName) { Rename-Item $web[0].FullName $webName }
+          }
+          # Naming must be FINAL before hashing and writing the feed.
+          node scripts/update-metadata.js ".\release\$name" ".\release\latest.yml"
+          if ($LASTEXITCODE -ne 0) { throw "Update metadata generation failed" }
 
       - name: Verify installer signatures
         shell: pwsh
@@ -223,6 +219,11 @@ jobs:
             Write-Host "$($exe.Name): status=$($sig.Status)  signer=$subject"
             if ($sig.Status -ne "Valid") {
               Write-Host "ERROR: $($exe.Name) is NOT signed"
+              $failed = $true
+            }
+            if (-not $sig.SignerCertificate -or
+                $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne "ONLINE PRIVACY SERVICES LTD") {
+              Write-Host "ERROR: $($exe.Name) has an unexpected publisher"
               $failed = $true
             }
           }
@@ -259,14 +260,7 @@ jobs:
             $title = "VPNUK $version (build $build)"
             $draft = $true
 
-            foreach ($exe in (Get-ChildItem .\release\*.exe)) {
-              $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-build$build.exe"
-              Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
-            }
-            foreach ($exe in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue)) {
-              $n = $exe.Name -replace ' ', '-' -replace '\.exe$', "-web-build$build.exe"
-              Rename-Item $exe.FullName (Join-Path $exe.DirectoryName $n)
-            }
+            # Names and matching latest.yml were finalized before artifact upload.
           }
 
           $artifacts = @()
@@ -281,8 +275,7 @@ jobs:
           if ($draft) {
             gh release create "$tag" --title "$title" --draft --notes "Build $build" @artifacts
           } else {
-            # Remove any existing draft with this tag so we can publish cleanly
-            gh release delete "$tag" --yes --cleanup-tag 2>$null
-            Start-Sleep -Seconds 2
+            gh release view "$tag" --json tagName 2>$null
+            if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; refusing to replace it automatically." }
             gh release create "$tag" --title "$title" --notes "VPNUK for Windows v$version" @artifacts
           }

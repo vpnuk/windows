@@ -4,10 +4,14 @@ const { settingsPath, connectionStates } = require('../../modules/constants');
 const { spawnChild } = require('../utils/async');
 const { escapeSpaces } = require('../utils/cmd');
 const VpnBase = require('./VpnBase');
+const { windowsArch, executableArch } = require('../../modules/windows-arch');
 
 const isDev = process.env.ELECTRON_ENV === 'Dev';
 
 const getOpenVpnExePathSync = (obfuscate = false) => {
+    if (obfuscate && windowsArch() === 'arm64') {
+        throw new Error('OpenVPN obfuscation is not available for ARM64. Select TCP or UDP instead.');
+    }
     if (process.env.OVPN_EXT_PATH && isDev) {
         return escapeSpaces(process.env.OVPN_EXT_PATH);
     }
@@ -23,6 +27,9 @@ const getOpenVpnExePathSync = (obfuscate = false) => {
     let exePath = exeKey.substring(exeKey.indexOf('REG_SZ') + 6).trim();
 
     if (fs.existsSync(exePath)) {
+        if (windowsArch() === 'arm64' && executableArch(exePath) !== 'arm64') {
+            throw new Error('Install the native ARM64 OpenVPN package from Settings. An emulated x86/x64 installation cannot supply native ARM drivers.');
+        }
         return escapeSpaces(exePath);
     }
 
@@ -45,9 +52,9 @@ const getOvpnAdapterNames = async () =>
         .map(line => line.substring(1, line.indexOf('\'', 1)));
 
 const installOvpnUpdate = file =>
-    cp.spawnSync('cmd', [`/c\ \"${file}\"`,
-        'ADDLOCAL=OpenVPN,OpenVPN.Service,Drivers,Drivers.TAPWindows6',
-        'SELECT_ASSOCIATIONS=0', '/passive'], { shell: true })
+    cp.spawnSync('msiexec.exe', ['/i', file,
+        ...(windowsArch() === 'arm64' ? [] : ['ADDLOCAL=OpenVPN,OpenVPN.Service,Drivers,Drivers.TAPWindows6']),
+        'SELECT_ASSOCIATIONS=0', '/passive', '/norestart'], { shell: false })
         .status;
 
 class OpenVpn extends VpnBase {
@@ -95,7 +102,9 @@ class OpenVpn extends VpnBase {
         catch (error) {
             this.#connection = null;
             this.#connectionStatus = connectionStates.disconnected;
+            this._disconnectedHook?.(true);
             this._errorHook?.(error);
+            throw error;
         }
     }
 

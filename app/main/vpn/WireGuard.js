@@ -1,331 +1,151 @@
+'use strict';
 const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { connectionStates, settingsPath, wgConfSlug } = require('../../modules/constants');
+const { connectionStates } = require('../../modules/constants');
 const VpnBase = require('./VpnBase');
+const { createConfig, releaseConfig, removeLocalConfig, confPath } = require('../../modules/wg-config');
+const { serviceState, stopAndRemoveTunnel, cleanupOwnedTunnels } = require('../utils/wg-tunnels');
+const { cleanupBypassRoutes } = require('../utils/bypass-routes');
 
-const isDev = process.env.ELECTRON_ENV === 'Dev';
-
-// How often (ms) to poll the WireGuard tunnel service for an unexpected drop.
-const DROP_POLL_INTERVAL = 5000;
-
-const getWireGuardExePath = () => {
-    if (process.env.WG_EXT_PATH && isDev) {
-        return process.env.WG_EXT_PATH;
-    }
-    const regResult = cp.spawnSync(
-        'cmd',
-        ['/c', 'reg', 'query', 'HKLM\\SOFTWARE\\WireGuard', '/v', 'InstallationDirectory'],
-        { shell: true }
-    );
-    const out = '' + regResult.stdout;
-    const match = out.match(/InstallationDirectory\s+REG_SZ\s+(.+)/);
-    if (match) {
-        const dir = match[1].trim();
-        const exe = path.join(dir, 'wireguard.exe');
-        if (fs.existsSync(exe)) return exe;
-    }
-    const defaultPath = 'C:\\Program Files\\WireGuard\\wireguard.exe';
-    if (fs.existsSync(defaultPath)) return defaultPath;
-    throw new Error('WireGuard is not installed. Please install it from wireguard.com or restart the app to trigger auto-install.');
-};
-
-// Stop a WireGuard tunnel service by name using `sc stop`, then poll
-// `sc query` until the service actually reaches STOPPED state.
-//
-// IMPORTANT: sc stop sends the stop signal and returns immediately — the
-// service (and its kernel driver) may still be active for several seconds
-// afterwards.  Calling /uninstalltunnelservice while the kernel driver is
-// still running has been observed to cause BSODs on some Windows versions.
-// We must wait for STATE : 1  STOPPED before proceeding.
-const stopTunnelService = (tunnelName) => {
-    const svcName = `WireGuardTunnel$${tunnelName}`;
-
-    // Send the stop signal
-    cp.spawnSync('sc', ['stop', svcName], { shell: true, timeout: 8000 });
-
-    // Poll until STOPPED (or timeout after 15 s)
-    const deadline = Date.now() + 15000;
-    while (Date.now() < deadline) {
-        const q = cp.spawnSync('sc', ['query', svcName], { shell: true, timeout: 5000 });
-        const out = '' + q.stdout;
-        // Service is gone or stopped — safe to proceed
-        if (q.status !== 0 || out.includes('STATE              : 1  STOPPED') ||
-            out.includes('does not exist')) break;
-        // Brief busy-wait — spawnSync blocks the event loop so we use a tight loop
-        cp.spawnSync('cmd', ['/c', 'ping', '-n', '2', '127.0.0.1'], { shell: true });
-    }
-};
-
-// Set a WireGuard tunnel service start-type to DEMAND (manual).
-// By default wireguard.exe /installtunnelservice registers AUTO — which means
-// the tunnel reconnects automatically after a reboot without the app's knowledge.
-const setServiceDemandStart = (tunnelName) => {
-    const svcName = `WireGuardTunnel$${tunnelName}`;
-    cp.spawnSync('sc', ['config', svcName, 'start=', 'demand'], { shell: true, timeout: 5000 });
-};
-
-// Uninstall a WireGuard tunnel service.
-// NOTE: we do NOT pipe proc.stdout/stderr to logStream here.
-// Piping streams into Electron's log stream during kernel driver teardown
-// can trigger a race condition that causes a BSOD on some Windows versions.
-const uninstallTunnelService = (wgExe, tunnelName) => {
-    return new Promise(resolve => {
-        const proc = cp.spawn(wgExe, ['/uninstalltunnelservice', tunnelName], { shell: false });
-        proc.on('close', code => resolve(code));
-        proc.on('error', () => resolve(-1));
-        // Safety timeout: if wireguard.exe hangs, resolve after 10 s
-        setTimeout(() => resolve(-99), 10000);
-    });
-};
-
-// On app startup: find and clean up any VPNUK WireGuard tunnel services that
-// were left running from a previous session (crash, forced close, etc.).
-// Lists all services whose name starts with "WireGuardTunnel$", stops and
-// uninstalls any that were created by us (conf file lives in APPDATA\VPNUK).
-// NOTE: This runs synchronously — createWindow() must not be called until
-// cleanup is complete, otherwise a new connection attempt can race the uninstall.
-const cleanupOrphanedTunnels = (wgExe) => {
-    try {
-        const result = cp.spawnSync(
-            'cmd',
-            ['/c', 'sc', 'query', 'type=', 'all', 'state=', 'all'],
-            { shell: true, timeout: 10000 }
-        );
-        const output = '' + result.stdout;
-        const tunnelNames = [];
-        const re = /SERVICE_NAME:\s+(WireGuardTunnel\$\S+)/g;
-        let m;
-        while ((m = re.exec(output)) !== null) {
-            tunnelNames.push(m[1].replace('WireGuardTunnel$', ''));
-        }
-        if (tunnelNames.length === 0) return;
-
-        // Step 1 — stop all found services first
-        for (const name of tunnelNames) {
-            stopTunnelService(name);
-        }
-
-        // Step 2 — give the kernel driver a moment to release resources
-        // then uninstall synchronously so cleanup is done before createWindow().
-        // spawnSync (not spawn) ensures the adapter is gone before we continue.
-        if (wgExe) {
-            cp.spawnSync('cmd', ['/c', 'ping', '-n', '3', '127.0.0.1'], { shell: true });
-            for (const name of tunnelNames) {
-                cp.spawnSync(wgExe, ['/uninstalltunnelservice', name],
-                    { shell: false, timeout: 10000 });
-            }
-        }
-    } catch {
-        // best-effort
-    }
-};
+function getWireGuardExePath() {
+    if (process.env.WG_EXT_PATH && process.env.ELECTRON_ENV === 'Dev') return process.env.WG_EXT_PATH;
+    const query = cp.spawnSync('reg.exe', ['query', 'HKLM\\SOFTWARE\\WireGuard', '/v', 'InstallationDirectory'],
+        { shell: false, windowsHide: true, encoding: 'utf8', timeout: 5000 });
+    const directory = String(query.stdout || '').match(/InstallationDirectory\s+REG_SZ\s+(.+)/)?.[1]?.trim();
+    const candidates = [
+        directory && path.join(directory, 'wireguard.exe'),
+        path.join(process.env.ProgramW6432 || 'C:\\Program Files', 'WireGuard', 'wireguard.exe'),
+        'C:\\Program Files\\WireGuard\\wireguard.exe',
+    ];
+    const exe = candidates.find(candidate => candidate && fs.existsSync(candidate));
+    if (!exe) throw new Error('WireGuard is not installed. Install WireGuard from Settings and try again.');
+    return exe;
+}
 
 class WireGuard extends VpnBase {
-    #tunnelName;
-    #confPath;
-    #connectionStatus;
-    #dropWatcher = null;
-    // Mutex flag — prevents connect() and disconnect() running concurrently.
-    // Concurrent access to the WireGuard kernel driver during teardown can BSOD.
-    #operationInProgress = false;
+    #profile; #tunnelName; #status = connectionStates.disconnected;
+    #watcher = null; #queue = Promise.resolve(); #server = null; #pending = 0; #logClosed = false;
 
     constructor(profile, hooks) {
         super(profile, hooks);
-        // Use the shared slug rule: dedicated/1:1 → dedicated.conf, shared → <server>.conf
-        this.#confPath         = settingsPath.wgConf(profile.serverType, profile.server?.dns);
-        this.#tunnelName       = path.basename(this.#confPath, '.conf');
-        this.#connectionStatus = connectionStates.disconnected;
+        this.#profile = profile;
+        this.#tunnelName = path.basename(confPath(profile), '.conf');
     }
 
-    // ── Drop watcher ──────────────────────────────────────────────────────────
-    // Polls the WireGuard tunnel service every DROP_POLL_INTERVAL ms.
-    // If the service stops running while we think we are connected (i.e. not a
-    // user-initiated disconnect) we fire disconnectedHook(false) so the kill
-    // switch stays active and the UI shows the correct state.
-    #startDropWatcher() {
-        const svcName = `WireGuardTunnel$${this.#tunnelName}`;
-        this.#dropWatcher = setInterval(() => {
-            if (this.#connectionStatus !== connectionStates.connected) {
-                this.#stopDropWatcher();
-                return;
-            }
-            const result = cp.spawnSync('sc', ['query', svcName], { shell: true, timeout: 5000 });
-            const out = '' + result.stdout;
-            if (!out.includes('RUNNING')) {
-                this.#stopDropWatcher();
-                this.#connectionStatus = connectionStates.disconnected;
-                // intentional = false — tunnel dropped on its own
-                this._disconnectedHook?.(false);
-            }
-        }, DROP_POLL_INTERVAL);
+    #serialize(operation) {
+        this.#pending++;
+        const next = this.#queue.then(operation);
+        this.#queue = next.catch(() => {}).then(() => { this.#pending--; });
+        return next;
     }
 
-    #stopDropWatcher() {
-        if (this.#dropWatcher) {
-            clearInterval(this.#dropWatcher);
-            this.#dropWatcher = null;
-        }
+    #stopWatcher() {
+        if (this.#watcher) clearInterval(this.#watcher);
+        this.#watcher = null;
     }
 
-    async connect() {
-        const ts = () => new Date().toISOString();
+    #log(message) { if (!this.#logClosed) this._logStream.write(message); }
+    #closeLog() {
+        if (!this.#logClosed) this._logStream.end();
+        this.#logClosed = true;
+    }
 
-        // Guard against concurrent connect/disconnect — both touch the WireGuard
-        // kernel driver and running them simultaneously can cause a BSOD.
-        if (this.#operationInProgress) {
-            this._logStream.write(`[${ts()}] connect() ignored — operation already in progress\n`);
+    #exeOrNull() {
+        try { return getWireGuardExePath(); } catch { return null; }
+    }
+
+    async #removeSession(intentional) {
+        this.#stopWatcher();
+        // No early return if the external WireGuard application was uninstalled.
+        stopAndRemoveTunnel(this.#tunnelName, this.#exeOrNull());
+        removeLocalConfig(this.#profile);
+        cleanupBypassRoutes();
+        this.#status = connectionStates.disconnected;
+        // Restore the intentional-disconnect kill-switch route before API deletion.
+        this._disconnectedHook?.(intentional);
+        // Remote cleanup runs after connectivity is restored on an intentional
+        // disconnect. It cannot complete through an active drop kill switch.
+        if (!intentional && this.#profile.killSwitchEnabled) {
+            this.#log('Remote peer cleanup deferred while the kill switch blocks internet access.\n');
+            this.#closeLog();
             return;
         }
-        this.#operationInProgress = true;
-
         try {
-            this._logStream.write(`\n[${ts()}] === WireGuard Connect ===\n`);
-            this._logStream.write(`[${ts()}] server.label : ${this._server?.label || '(none)'}\n`);
-            this._logStream.write(`[${ts()}] server.dns   : ${this._server?.dns  || '(none)'}\n`);
-            this._logStream.write(`[${ts()}] server.host  : ${this._server?.host || '(none)'}\n`);
-            this._logStream.write(`[${ts()}] confPath     : ${this.#confPath}\n`);
-            this._logStream.write(`[${ts()}] tunnelName   : ${this.#tunnelName}\n`);
-            this._logStream.write(`[${ts()}] confExists   : ${fs.existsSync(this.#confPath)}\n`);
+            await releaseConfig(this.#profile, this.#server === null ? undefined : this.#server);
+        } catch (error) {
+            // Local keys/service are already gone. Offline remote deletion must not
+            // pretend it succeeded; the next connect releases this device slot again.
+            this.#log(`WireGuard remote config cleanup failed: ${error.message}\n`);
+            this._errorHook?.(new Error('Local WireGuard config removed. Server-side cleanup could not finish; it will be retried before the next connection.'));
+        } finally {
+            this.#closeLog();
+        }
+    }
 
-            if (!fs.existsSync(this.#confPath)) {
-                this._logStream.write(`[${ts()}] ERROR: conf file not found\n`);
-                this._errorHook?.(new Error(
-                    'WireGuard config not found. Open Settings → Connection tab and click "Fetch WireGuard Config" first.'
-                ));
-                return;
-            }
-
-            let wgExe;
+    connect() {
+        return this.#serialize(async () => {
             try {
-                wgExe = getWireGuardExePath();
-            } catch (err) {
-                this._logStream.write(`[${ts()}] ERROR: WireGuard exe not found: ${err.message}\n`);
-                this._errorHook?.(err);
-                return;
-            }
-
-            this._logStream.write(`[${ts()}] wgExe        : ${wgExe}\n`);
-            this._connectingHook?.();
-            this.#connectionStatus = connectionStates.connecting;
-
-            // Clean up any existing tunnel for this name before installing a fresh one.
-            // stopTunnelService now polls until the service is truly STOPPED before returning,
-            // so it is safe to call uninstall immediately afterwards.
-            this._logStream.write(`[${ts()}] Stopping any existing tunnel service...\n`);
-            stopTunnelService(this.#tunnelName);
-            const unCode = await uninstallTunnelService(wgExe, this.#tunnelName);
-            this._logStream.write(`[${ts()}] Pre-connect uninstall exit: ${unCode}\n`);
-
-            const result = cp.spawnSync(
-                wgExe,
-                ['/installtunnelservice', this.#confPath],
-                { shell: false, timeout: 15000 }
-            );
-
-            this._logStream.write(`[${ts()}] wireguard /installtunnelservice exit: ${result.status}\n`);
-            if (result.stdout) this._logStream.write(`[stdout] ${result.stdout}\n`);
-            if (result.stderr) this._logStream.write(`[stderr] ${result.stderr}\n`);
-
-            if (result.status === 0) {
-                // Immediately change service start-type from AUTO to DEMAND.
-                // AUTO start means the tunnel auto-reconnects on reboot, which we never want.
-                setServiceDemandStart(this.#tunnelName);
-                this._logStream.write(`[${ts()}] Service start-type set to DEMAND (manual)\n`);
-                this.#connectionStatus = connectionStates.connected;
+                const exe = getWireGuardExePath();
+                this.#status = connectionStates.connecting;
+                this._connectingHook?.();
+                cleanupOrphanedTunnels();
+                stopAndRemoveTunnel(this.#tunnelName, exe);
+                this.#log('Requesting a new WireGuard config for this connection.\n');
+                const config = await createConfig(this.#profile);
+                this.#server = config.server;
+                const result = cp.spawnSync(exe, ['/installtunnelservice', config.file],
+                    { shell: false, windowsHide: true, timeout: 20000 });
+                if (result.error || result.status !== 0) throw new Error('WireGuard tunnel could not start.');
+                const manual = cp.spawnSync('sc.exe', ['config', `WireGuardTunnel$${this.#tunnelName}`, 'start=', 'demand'],
+                    { shell: false, windowsHide: true, timeout: 10000 });
+                if (manual.status !== 0) throw new Error('Could not disable automatic WireGuard startup.');
+                let state = serviceState(this.#tunnelName);
+                for (let attempt = 0; state !== 4 && state !== null && attempt < 10; attempt++) {
+                    cp.spawnSync('ping.exe', ['-n', '2', '127.0.0.1'], { shell: false, windowsHide: true, timeout: 3000 });
+                    state = serviceState(this.#tunnelName);
+                }
+                if (state !== 4) throw new Error('WireGuard tunnel service is not running.');
+                this.#status = connectionStates.connected;
                 this._connectedHook?.();
-                // Start watching for unexpected drops.
-                this.#startDropWatcher();
-            } else {
-                this.#connectionStatus = connectionStates.disconnected;
-                // intentional = true — connection never established, treat as expected failure
-                this._disconnectedHook?.(true);
-                this._errorHook?.(new Error(
-                    'WireGuard tunnel failed to start. Check the LOG tab for details.'
-                ));
+                this.#watcher = setInterval(() => {
+                    try {
+                        if (this.#exeOrNull() && serviceState(this.#tunnelName) === 4) return;
+                        this.#stopWatcher();
+                        this.#serialize(() => this.#removeSession(false)).catch(error => this._errorHook?.(error));
+                    } catch (error) {
+                        this.#stopWatcher();
+                        this._errorHook?.(error);
+                    }
+                }, 5000);
+            } catch (error) {
+                // Do not delete keys or report a clean disconnect unless the driver
+                // really stopped. Retain a failed service for a safe retry.
+                try { await this.#removeSession(true); }
+                catch (cleanupError) { this._errorHook?.(cleanupError); }
+                this._errorHook?.(error);
+                throw error;
             }
-        } finally {
-            this.#operationInProgress = false;
-        }
+        });
     }
 
-    async disconnect() {
-        const ts = () => new Date().toISOString();
-
-        // Guard against concurrent connect/disconnect — both touch the WireGuard
-        // kernel driver and running them simultaneously can cause a BSOD.
-        if (this.#operationInProgress) {
-            this._logStream.write(`[${ts()}] disconnect() — waiting for in-progress operation...\n`);
-            // Wait for connect() to finish (it holds the flag), then proceed.
-            const waited = Date.now();
-            while (this.#operationInProgress && Date.now() - waited < 20000) {
-                await new Promise(r => setTimeout(r, 200));
-            }
-        }
-        this.#operationInProgress = true;
-
-        try {
-            // Stop the drop watcher FIRST so it does not fire a false unexpected-drop
-            // event while we are tearing the tunnel down intentionally.
-            this.#stopDropWatcher();
-
-            let wgExe;
-            try {
-                wgExe = getWireGuardExePath();
-            } catch {
-                this.#connectionStatus = connectionStates.disconnected;
-                // intentional = true
-                this._disconnectedHook?.(true);
-                this._logStream.end();
-                return;
-            }
-
-            this._logStream.write(`\n[${ts()}] === WireGuard Disconnect ===\n`);
-
-            // Step 1 — Stop the service and WAIT until the kernel driver confirms
-            // STOPPED state before proceeding.  stopTunnelService() polls sc query
-            // so the driver is fully idle before we call uninstall.
-            // Calling /uninstalltunnelservice while the driver is still active has
-            // been observed to cause BSODs on some Windows versions.
-            this._logStream.write(`[${ts()}] Stopping tunnel service (sc stop + poll)...\n`);
-            stopTunnelService(this.#tunnelName);
-
-            // Step 2 — Uninstall the tunnel (removes the adapter entry entirely).
-            // No extra sleep needed — stopTunnelService already confirmed STOPPED.
-            this._logStream.write(`[${ts()}] Uninstalling tunnel service...\n`);
-            const code = await uninstallTunnelService(wgExe, this.#tunnelName);
-            this._logStream.write(`[${ts()}] Uninstall exit: ${code}\n`);
-
-            this.#connectionStatus = connectionStates.disconnected;
-            // intentional = true — user initiated this disconnect
-            this._disconnectedHook?.(true);
-            this._logStream.end();
-        } finally {
-            this.#operationInProgress = false;
-        }
-    }
-
-    getConnectionStatus() {
-        return this.#connectionStatus;
-    }
+    disconnect() { return this.#serialize(() => this.#removeSession(true)); }
+    getConnectionStatus() { return this.#status; }
+    isBusy() { return this.#pending > 0; }
 }
 
-const checkWireGuardInstalled = () => {
-    try {
-        getWireGuardExePath();
-        return true;
-    } catch {
-        return false;
-    }
-};
+function cleanupOrphanedTunnels() {
+    let exe = null;
+    try { exe = getWireGuardExePath(); } catch {}
+    cleanupOwnedTunnels(exe);
+}
 
-const installWireGuard = installerPath => {
-    const result = cp.spawnSync(
-        'cmd',
-        ['/c', `"${installerPath}"`, '/quiet'],
-        { shell: true }
-    );
-    return result.status;
-};
+function checkWireGuardInstalled() {
+    try { getWireGuardExePath(); return true; } catch { return false; }
+}
+
+function installWireGuard(installerPath) {
+    return cp.spawnSync(installerPath, ['/quiet'], { shell: false, windowsHide: true }).status;
+}
 
 module.exports = { WireGuard, checkWireGuardInstalled, installWireGuard, cleanupOrphanedTunnels };

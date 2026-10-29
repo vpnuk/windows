@@ -464,7 +464,8 @@ ipcRenderer.on('ovpn-update-response', async (event, arg) => {
     Promise.all([
         downloadOvpnUpdate(arg.original),
         downloadPatchedOvpnExe(arg.patch)
-    ]).then(result => event.sender.send('ovpn-update-install', { info: arg, file: result[0] }));
+    ]).then(result => event.sender.send('ovpn-update-install', { info: arg, file: result[0] }))
+        .catch(error => ipcRenderer.send('dependency-download-error', { message: error.message }));
 });
 
 ipcRenderer.on('ovpn-update-installed', (_, arg) => {

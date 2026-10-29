@@ -110,12 +110,22 @@ send:
 !macroend
 !define uninstallOvpn "!insertmacro uninstallOvpn"
 
+!macro cleanupVpnukTunnels
+    ; Stop only services whose actual config belongs to VPNUK, even if the
+    ; WireGuard application has already been uninstalled. Wait for STOPPED;
+    ; never delete a live driver service after an arbitrary sleep.
+    nsExec::ExecToStack `powershell -NoProfile -NonInteractive -Command "$$ErrorActionPreference = 'Stop'; $$owned = Get-CimInstance Win32_Service | Where-Object { $$_.Name.StartsWith(('WireGuardTunnel' + [char]36)) -and $$_.PathName.ToLowerInvariant().Contains(([char]92 + 'vpnuk' + [char]92)) }; foreach ($$item in $$owned) { $$service = Get-Service -Name $$item.Name; if ($$service.Status -ne 'Stopped') { $$service.Stop(); $$service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20)) }; sc.exe delete $$item.Name | Out-Null; if ($$LASTEXITCODE -ne 0) { throw 'Cannot delete stopped VPNUK tunnel' } }"`
+    Pop $0
+    ${If} $0 != 0
+        Pop $0
+        MessageBox MB_OK "A VPNUK tunnel could not be stopped safely. Close VPNUK, disconnect the VPN and try again."
+        Abort
+    ${EndIf}
+    Pop $0
+!macroend
+
 !macro uninstallWg
-    ; Step 1 — Stop AND delete every WireGuardTunnel service entry.
-    nsExec::ExecToStack 'powershell -NonInteractive -Command "$$svcs = Get-Service -Name WireGuardTunnel* -ErrorAction SilentlyContinue; foreach ($$s in $$svcs) { Stop-Service $$s -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 500; sc.exe delete $$s.Name | Out-Null }"'
-    Pop $0
-    Pop $0
-    Sleep 2000
+    !insertmacro cleanupVpnukTunnels
 
     ; Step 2 — Locate wireguard.exe from known install paths and call /uninstall.
     StrCpy $1 ""
@@ -249,7 +259,14 @@ send:
             nsJSON::Get "openvpn" "version" /end
             Pop $ovpnVersion
 
-            ${If} ${RunningX64}
+            ; Detect the native OS even when this installer is emulated on ARM.
+            ReadEnvStr $1 PROCESSOR_ARCHITEW6432
+            ${If} $1 == ""
+                ReadEnvStr $1 PROCESSOR_ARCHITECTURE
+            ${EndIf}
+            ${If} $1 == "ARM64"
+                StrCpy $1 "arm64"
+            ${ElseIf} ${RunningX64}
                 StrCpy $1 "win64"
             ${Else}
                 StrCpy $1 "win32"
@@ -285,12 +302,22 @@ send:
             Pop $1
             
             ${If} $1 == "OK"
-                nsExec::ExecToStack 'cmd /c "$TEMP\ovpnInstaller.msi" \
-                    ADDLOCAL=OpenVPN,OpenVPN.Service,Drivers,Drivers.TAPWindows6 \
-                    SELECT_ASSOCIATIONS=0 /passive'
+                ReadEnvStr $0 PROCESSOR_ARCHITEW6432
+                ${If} $0 == ""
+                    ReadEnvStr $0 PROCESSOR_ARCHITECTURE
+                ${EndIf}
+                ${If} $0 == "ARM64"
+                    ; Let the ARM MSI select its own native driver features.
+                    nsExec::ExecToStack 'msiexec.exe /i "$TEMP\ovpnInstaller.msi" SELECT_ASSOCIATIONS=0 /passive /norestart'
+                ${Else}
+                    nsExec::ExecToStack 'msiexec.exe /i "$TEMP\ovpnInstaller.msi" \
+                        ADDLOCAL=OpenVPN,OpenVPN.Service,Drivers,Drivers.TAPWindows6 \
+                        SELECT_ASSOCIATIONS=0 /passive /norestart'
+                ${EndIf}
                 Pop $0
                 
                 ${If} $0 != 0
+                ${AndIf} $0 != 3010
                     Pop $0
                     MessageBox MB_OK "Error installing openvpn:$\n$0"
                     Abort
@@ -540,6 +567,12 @@ FunctionEnd
         ${EndIf}
 
         ; ------------- User data -------------
+        !insertmacro cleanupVpnukTunnels
+        ; Keeping profiles must not keep ephemeral WireGuard private keys.
+        Delete "$APPDATA\VPNUK\vpnuk-*.conf"
+        Delete "$APPDATA\VPNUK\shared.conf"
+        Delete "$APPDATA\VPNUK\dedicated.conf"
+        Delete "$APPDATA\VPNUK\11dedicated.conf"
         ${If} $userDataFlag == true
             RMDir /r "$APPDATA\VPNUK"
         ${EndIf}

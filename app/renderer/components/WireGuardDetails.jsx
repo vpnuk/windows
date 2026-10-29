@@ -8,7 +8,7 @@
 import React             from 'react';
 import { observer }      from 'mobx-react-lite';
 import '@components/index.css';
-import { useStore }      from '@domain';
+import { useStore, ConnectionStore } from '@domain';
 import { settingsPath }  from '@modules/constants.js';
 
 const fs        = require('fs');
@@ -20,10 +20,11 @@ const { getConfEndpointIp } = require('./wgApi');
 const WireGuardDetails = observer(() => {
     const profile    = useStore().profiles.currentProfile;
     void profile.wgConfigFetched;   // track observable so panel re-renders after connect
+    void ConnectionStore.state;    // main creates/removes configs after renderer preflight
 
     const serverType    = profile.serverType || 'shared';
     const serverHost    = profile.server?.host || '';
-    const confPath      = settingsPath.wgConf(serverType, null);
+    const confPath      = settingsPath.wgConf(serverType, null, profile.id);
     const confName      = path.basename(confPath);
     const confExists    = (() => { try { return fs.existsSync(confPath); } catch { return false; } })();
     const endpointIp    = confExists ? getConfEndpointIp(confPath) : null;
@@ -38,8 +39,9 @@ const WireGuardDetails = observer(() => {
                     <h4>WireGuard — Auto-Connect</h4>
                     <p>
                         Your config is generated automatically when you click{' '}
-                        <strong>Connect</strong>. Switching servers releases the old
-                        config and fetches the correct one seamlessly.
+                        <strong>Connect</strong>. Each connection releases the previous
+                        device config and requests a new one. Disconnect removes the
+                        local config and releases the server-side config when reachable.
                     </p>
 
                     {confExists && !serverMismatch && (

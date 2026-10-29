@@ -130,7 +130,7 @@ const WgConfigEditor = ({ profileId, serverType, serverDns, reloadKey }) => {
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
     const confPath = profileId
-        ? settingsPath.wgConf(serverType, serverDns)
+        ? settingsPath.wgConf(serverType, serverDns, profileId)
         : null;
 
     // reloadKey changes every time a config is fetched or cleared, so the

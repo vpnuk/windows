@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { settingsPath, settingsLink } = require('./constants');
 const AdmZip = require('adm-zip');
+const { windowsArch, downloadForArch } = require('./windows-arch');
 
 const dowloadOvpnConfig = (link, filePath) =>
     axios
@@ -32,7 +33,7 @@ const dowloadJson = (link, filePath) =>
 const downloadPatchedOvpnExe = links => {
     // No obfuscation patch available for arm64 yet — skip silently.
     // arm64 Windows can still use standard OpenVPN (no obfuscation mode).
-    if (process.arch === 'arm64' && !links.win_arm64) {
+    if (windowsArch() === 'arm64' && !(links && (links.arm64 || links.win_arm64))) {
         return Promise.resolve(false);
     }
     let link = getLinkByArch(links);
@@ -109,13 +110,9 @@ const getVersions = file => fs.existsSync(file)
 
 // Returns the download link appropriate for the current CPU architecture.
 //   ia32  (32-bit Windows) → win32
-//   arm64 (Windows on ARM) → win_arm64, falling back to win64
+//   arm64 (Windows on ARM) → arm64 (legacy win_arm64 also accepted), never x64
 //   x64   (64-bit Windows) → win64
-const getLinkByArch = node => {
-    if (process.arch === 'ia32')  return node.win32    || node.win64;
-    if (process.arch === 'arm64') return node.win_arm64 || node.win64;
-    return node.win64;
-};
+const getLinkByArch = node => downloadForArch(node);
 
 // ─── WireGuard Install Check ──────────────────────────────────────────────────
 

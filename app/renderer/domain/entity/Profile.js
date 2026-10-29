@@ -38,6 +38,7 @@ class Profile {
         allowedIps: { ...optionsAllowedIps[0], customValue: '' },
         killSwitchEnabled: false
     };
+    bypassIps = [];
     wgConfigFetched = false;
 
     constructor(label = 'New profile', vpnType = VpnType.OpenVPN.label) {

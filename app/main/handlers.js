@@ -30,10 +30,14 @@ const {
 } = require('./utils/certs');
 const { enableAutoUpdate } = require('./updater');
 const { downloadWireGuardInstaller } = require('../modules/catalogs');
+const { bypassPrefixes } = require('../modules/ip-bypass');
+const { installBypassRoutes, cleanupBypassRoutes } = require('./utils/bypass-routes');
 
 const isDev = process.env.ELECTRON_ENV === 'Dev';
 
 let vpnConnection = null;
+let connectionStarting = false;
+let connectionStartTask = null;
 
 // ─── Kill-switch crash-recovery state file ────────────────────────────────────
 // Written to disk whenever the kill switch is active so that if the app is
@@ -71,6 +75,7 @@ const showMessageBoxOnError = (error, title = 'Error', sender = null) => {
 };
 
 const closeConnection = async (beforeDisconnectCb = () => { }) => {
+    if (connectionStarting) await connectionStartTask;
     let status = await vpnConnection?.getConnectionStatus();
     isDev && console.log(`closeConnection. status=${status}`);
     // Disconnect if connected OR still connecting — the tunnel service is already
@@ -90,7 +95,7 @@ const closeConnection = async (beforeDisconnectCb = () => { }) => {
         cancelId: 1
     }) !== 1) {
         beforeDisconnectCb();
-        await vpnConnection.disconnect();
+        await disconnectVpn();
         return true;
     }
     return false;
@@ -100,7 +105,15 @@ exports.closeConnection = closeConnection;
 // ─── Connection ───────────────────────────────────────────────────────────────
 
 ipcMain.on('connection-start', async (event, args) => {
-    isDev && console.log('connection-start', args);
+    if (connectionStarting || vpnConnection?.isBusy?.() ||
+        [connectionStates.connected, connectionStates.connecting].includes(vpnConnection?.getConnectionStatus())) {
+        sendNotification(event.sender, { type: 'warning', title: 'VPN busy', message: 'Disconnect the current connection before starting another.' });
+        return;
+    }
+    connectionStarting = true;
+    let completeStart;
+    connectionStartTask = new Promise(resolve => { completeStart = resolve; });
+    try {
     const { profile, gateway, wVpnOptions } = args;
     const { tray } = require('./main');
     const pid = profile.id || 'default';
@@ -142,6 +155,11 @@ ipcMain.on('connection-start', async (event, args) => {
     let connectionActive = true;
 
     try {
+    bypassPrefixes(profile.bypassIps);
+    cleanupBypassRoutes();
+    if ([VpnType.OpenVPN.label, VpnType.WireGuard.label].includes(profile.vpnType)) {
+        installBypassRoutes(profile.bypassIps, gateway);
+    }
     vpnConnection = createVpn(profile, {
         connectedHook: async () => {
             appendToLog(pid, `Hook: connected to ${profile.server?.label}`);
@@ -188,6 +206,8 @@ ipcMain.on('connection-start', async (event, args) => {
         // intentional = false → tunnel dropped unexpectedly (keep internet blocked)
         disconnectedHook: (intentional = true) => {
             connectionActive = false;
+            try { cleanupBypassRoutes(); }
+            catch (error) { showMessageBoxOnError(error, 'Bypass route cleanup', event.sender); }
             appendToLog(pid, `Hook: disconnected (intentional=${intentional})`);
             try {
                 event.sender.send('connection-changed', connectionStates.disconnected);
@@ -229,22 +249,45 @@ ipcMain.on('connection-start', async (event, args) => {
         },
         errorHook: error => {
             appendToLog(pid, `Hook: ERROR — ${error.message}`);
-            // Error detail stays in the log; UI update arrives via disconnectedHook.
+            showMessageBoxOnError(error, 'VPN connection', event.sender);
         }
     }, wVpnOptions);
 
         await vpnConnection.connect();
     } catch (err) {
         appendToLog(pid, `FATAL: createVpn/connect threw — ${err.message}`);
+        try { cleanupBypassRoutes(); } catch (cleanupError) {
+            showMessageBoxOnError(cleanupError, 'Bypass route cleanup', event.sender);
+        }
         // Raw error stays in the log only — send a clean disconnect so the
         // renderer shows its own 'Connection failed' message.
-        try { event.sender.send('connection-changed', connectionStates.disconnected); } catch { /* renderer gone */ }
+        try { event.sender.send('connection-changed', vpnConnection?.getConnectionStatus() || connectionStates.disconnected); } catch { /* renderer gone */ }
+        showMessageBoxOnError(err, 'VPN connection', event.sender);
+    }
+    } finally {
+        connectionStarting = false;
+        completeStart();
     }
 });
 
-ipcMain.on('connection-stop', async () => {
-    isDev && console.log('connection-stop');
+async function disconnectVpn() {
+    if (connectionStarting) await connectionStartTask;
     await vpnConnection?.disconnect();
+    cleanupBypassRoutes();
+}
+exports.disconnectVpn = disconnectVpn;
+
+ipcMain.on('connection-stop', async event => {
+    try { await disconnectVpn(); }
+    catch (error) { showMessageBoxOnError(error, 'Disconnect failed', event.sender); }
+});
+
+ipcMain.handle('wg-preflight', () => checkWireGuardInstalled()
+    ? { success: true }
+    : { success: false, error: 'WireGuard is not installed. Install it from Settings and try again.' });
+
+ipcMain.on('dependency-download-error', (event, arg) => {
+    showMessageBoxOnError(new Error(arg.message), 'OpenVPN download failed', event.sender);
 });
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────
@@ -308,12 +351,13 @@ ipcMain.on('ovpn-update-request', async (event, arg) => {
 });
 
 ipcMain.on('ovpn-update-install', (event, arg) => {
-    if (installOvpnUpdate(arg.file) === 0) {
+    const code = installOvpnUpdate(arg.file);
+    if (code === 0 || code === 3010) {
         dialog.showMessageBoxSync({
             type: 'info',
             icon: path.join(__dirname, '../assets/icon.png'),
             title: 'VPNUK Update',
-            message: 'OpenVPN updated successfully.',
+            message: code === 3010 ? 'OpenVPN updated successfully. Restart Windows to finish installing its driver.' : 'OpenVPN updated successfully.',
             buttons: ['OK']
         });
         replaceVersionsEntry('openvpn', arg.info);
