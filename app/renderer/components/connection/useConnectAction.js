@@ -131,7 +131,9 @@ export function useConnectAction(profile) {
                 clearInterval(pollId);
             } else if (st === connectionStates.disconnected && seenConnecting) {
                 ConnectionLogStore.setError(
-                    'Connection failed. Please check your username and password, then try again.'
+                    vpnType === VpnType.WireGuard.label
+                        ? 'WireGuard could not connect. Please check the Log tab for details.'
+                        : 'Connection failed. Please check your username and password, then try again.'
                 );
                 clearInterval(pollId);
             } else if (ticks >= maxTicks) {

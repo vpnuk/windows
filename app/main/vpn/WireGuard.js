@@ -96,7 +96,12 @@ class WireGuard extends VpnBase {
                 this.#server = config.server;
                 const result = cp.spawnSync(exe, ['/installtunnelservice', config.file],
                     { shell: false, windowsHide: true, timeout: 20000 });
-                if (result.error || result.status !== 0) throw new Error('WireGuard tunnel could not start.');
+                if (result.error || result.status !== 0) {
+                    // Do not dump service output/config contents: they can
+                    // contain private keys. Keep safe failure codes in the log.
+                    const reason = result.error ? (result.error.code || 'launch failed') : `exit code ${result.status}`;
+                    throw new Error(`WireGuard tunnel could not start (${reason}).`);
+                }
                 const manual = cp.spawnSync('sc.exe', ['config', `WireGuardTunnel$${this.#tunnelName}`, 'start=', 'demand'],
                     { shell: false, windowsHide: true, timeout: 10000 });
                 if (manual.status !== 0) throw new Error('Could not disable automatic WireGuard startup.');

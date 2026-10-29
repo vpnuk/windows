@@ -39,6 +39,21 @@ function load(relative, mocks = {}, globals = {}) {
 
 const arch = require('../app/modules/windows-arch');
 const bypass = require('../app/modules/ip-bypass');
+const constants = require('../app/modules/constants');
+test('real UUID profiles produce stable, distinct WireGuard tunnel names within the 32-character limit', () => {
+    const ids = [
+        '8a6145bb-e4cd-4bc8-b42e-b7d73cf370aa',
+        '8a6145bb-e4cd-4bc8-b42e-b7d73cf370ab',
+        'profile_with_underscores',
+        'a'.repeat(48),
+    ];
+    const names = ids.map(id => path.basename(constants.settingsPath.wgConf('shared', null, id), '.conf'));
+    for (const name of names) assert(/^[a-zA-Z0-9_=+.-]{1,32}$/.test(name), `WireGuard rejects ${name}`);
+    assert.equal(new Set(names).size, ids.length);
+    assert.equal(constants.settingsPath.wgConf('shared', null, ids[0]),
+        constants.settingsPath.wgConf('dedicated', 'another-server', ids[0]));
+    assert.throws(() => constants.settingsPath.wgConf('shared', null, '../invalid'));
+});
 test('profile dropdowns distinguish unique IDs while preserving ordinary option values and hover colours', () => {
     const React = toolRequire('react');
     const { selectOptionColors } = load('app/renderer/styles.js');
@@ -277,7 +292,7 @@ test('WireGuard config transforms only AllowedIPs, leaving keys and endpoints in
     assert.throws(() => bypass.applyWireGuardBypass('[Peer]\n', ['1.2.3.4']));
 });
 
-function configFixture(failAction) {
+function configFixture(failAction, deleteResult = { deleted: true }) {
     const folder = temp();
     const calls = [];
     let serial = 0;
@@ -288,7 +303,7 @@ function configFixture(failAction) {
             const input = new URLSearchParams(form);
             calls.push({ url, action: input.get('action'), server: input.get('server'), device: input.get('device_label') });
             if (input.get('action') === failAction) return { data: { error: 'API rejected request' } };
-            return { data: input.get('action') === 'delete_config' ? { success: true } : {
+            return { data: input.get('action') === 'delete_config' ? deleteResult : {
                 config: `[Interface]\nPrivateKey = test-key-${++serial}\nAddress = 10.0.0.2/32\n[Peer]\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = uk1.example.test:51820\n`,
             } };
         } },
@@ -309,6 +324,45 @@ test('every connect releases the old peer and fetches a new config with stable d
     assert(!second.includes('AllowedIPs = 0.0.0.0/0'));
     f.api.removeLocalConfig(f.profile);
     assert(!fs.existsSync(f.settingsPath.wgConf()));
+});
+test('upgrading preserves an existing eight-character win label and deletes that identity before generating a replacement', async () => {
+    const f = configFixture();
+    const label = 'win-1234abcd';
+    const identity = JSON.stringify({ label });
+    fs.writeFileSync(f.settingsPath.device, identity);
+    fs.writeFileSync(f.settingsPath.wgConf(), 'old-private-key');
+    await f.api.createConfig(f.profile);
+    assert.deepEqual(f.calls.map(c => [c.action, c.device, c.server]), [
+        ['delete_config', label, ''],
+        ['get_config', label, '203.0.113.1'],
+    ]);
+    assert.equal(fs.readFileSync(f.settingsPath.device, 'utf8'), identity);
+    assert(!fs.readFileSync(f.settingsPath.wgConf(), 'utf8').includes('old-private-key'));
+    await f.api.releaseConfig(f.profile);
+    f.api.removeLocalConfig(f.profile);
+    assert.equal(f.calls[2].action, 'delete_config');
+    assert.equal(f.calls[2].device, label);
+    assert(!fs.existsSync(f.settingsPath.wgConf()));
+    assert.equal(fs.readFileSync(f.settingsPath.device, 'utf8'), identity);
+});
+test('missing or refused deletion acknowledgement blocks replacement config generation', async () => {
+    for (const response of [{ deleted: false }, { success: true }, 'unexpected response']) {
+        const f = configFixture(undefined, response);
+        fs.writeFileSync(f.settingsPath.wgConf(), 'old-private-key');
+        await assert.rejects(() => f.api.createConfig(f.profile), /did not confirm config deletion/);
+        assert.deepEqual(f.calls.map(c => c.action), ['delete_config']);
+        assert(!fs.existsSync(f.settingsPath.wgConf()));
+    }
+});
+test('invalid saved device labels cannot become a broad server-side deletion request', async () => {
+    for (const label of ['', '!!!', 'win_bad', 'a'.repeat(33)]) {
+        const f = configFixture();
+        const identity = JSON.stringify({ label });
+        fs.writeFileSync(f.settingsPath.device, identity);
+        await assert.rejects(() => f.api.createConfig(f.profile), /device identity is invalid/);
+        assert.equal(f.calls.length, 0);
+        assert.equal(fs.readFileSync(f.settingsPath.device, 'utf8'), identity);
+    }
 });
 test('failed server release cannot reuse old local keys or silently fetch another peer', async () => {
     const f = configFixture('delete_config');
@@ -380,6 +434,8 @@ test('startup cleanup distinguishes VPNUK config paths from other WireGuard appl
 
 function lifecycleFixture({ offlineCleanup = false, stopFails = false } = {}) {
     const events = [];
+    const profile = { id: '8a6145bb-e4cd-4bc8-b42e-b7d73cf370aa', credentials: { login: 'test', password: 'test' } };
+    const file = constants.settingsPath.wgConf('shared', null, profile.id);
     let installed = true;
     let watcher;
     class Base {
@@ -396,8 +452,8 @@ function lifecycleFixture({ offlineCleanup = false, stopFails = false } = {}) {
         fs: { existsSync: () => installed },
         '../utils/bypass-routes': { cleanupBypassRoutes: () => events.push('routes-removed') },
         '../../modules/wg-config': {
-            confPath: () => '/test/vpnuk-profile.conf',
-            createConfig: async () => { events.push('new-config'); return { file: '/test/vpnuk-profile.conf', server: '203.0.113.1' }; },
+            confPath: () => file,
+            createConfig: async () => { events.push('new-config'); return { file, server: '203.0.113.1' }; },
             removeLocalConfig: () => events.push('keys-removed'),
             releaseConfig: async () => {
                 events.push('remote-release');
@@ -413,11 +469,17 @@ function lifecycleFixture({ offlineCleanup = false, stopFails = false } = {}) {
             cleanupOwnedTunnels: () => events.push('orphans-cleaned'),
         },
         child_process: { spawnSync: (_, args) => {
-            if (args[0] === '/installtunnelservice') events.push('service-installed');
+            if (args[0] === '/installtunnelservice') {
+                const name = path.basename(args[1], '.conf');
+                // Mirror WireGuard for Windows conf.TunnelNameIsValid, not an
+                // unconditional success that hides invalid real-profile names.
+                if (!/^[a-zA-Z0-9_=+.-]{1,32}$/.test(name)) return { status: 1 };
+                events.push('service-installed');
+            }
             return { status: 0, stdout: 'InstallationDirectory REG_SZ C:\\WireGuard' };
         } },
     }, { setInterval: callback => { watcher = callback; return 1; }, clearInterval: () => {} });
-    const vpn = new WireGuard({ id: 'profile', credentials: { login: 'test', password: 'test' } }, {
+    const vpn = new WireGuard(profile, {
         connectingHook: () => events.push('connecting'),
         connectedHook: () => events.push('connected'),
         disconnectedHook: intentional => events.push(intentional ? 'disconnected' : 'dropped'),

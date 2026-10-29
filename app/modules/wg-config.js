@@ -10,7 +10,10 @@ const fallback = 'https://www.serverlistvault.com/wg/config';
 function deviceLabel() {
     if (fs.existsSync(settingsPath.device)) {
         const data = JSON.parse(fs.readFileSync(settingsPath.device, 'utf8'));
-        if (typeof data.label === 'string' && data.label) return data.label;
+        // Match the API's label alphabet and limit without sanitizing or
+        // replacing an existing identity. An empty API deletion label means
+        // "all configs", so malformed saved labels must fail closed.
+        if (typeof data.label === 'string' && /^[a-zA-Z0-9-]{1,32}$/.test(data.label)) return data.label;
         throw new Error('The saved WireGuard device identity is invalid.');
     }
     const label = `win-${crypto.randomBytes(8).toString('hex')}`;
@@ -52,7 +55,11 @@ function removeLocalConfig(profile) {
 }
 
 async function releaseConfig(profile, server) {
-    return request('delete_config', profile, server);
+    const data = await request('delete_config', profile, server);
+    if (data.deleted !== true) {
+        throw new Error('WireGuard server did not confirm config deletion. No replacement config was requested.');
+    }
+    return data;
 }
 
 async function createConfig(profile) {
