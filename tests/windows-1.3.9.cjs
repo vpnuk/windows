@@ -39,6 +39,49 @@ function load(relative, mocks = {}, globals = {}) {
 
 const arch = require('../app/modules/windows-arch');
 const bypass = require('../app/modules/ip-bypass');
+test('profile dropdowns distinguish unique IDs while preserving ordinary option values and hover colours', () => {
+    const React = toolRequire('react');
+    const { selectOptionColors } = load('app/renderer/styles.js');
+    const Select = () => null;
+    const Selector = load('app/renderer/components/common/ValueSelector.jsx', {
+        react: React, 'react-select': Select,
+        'mobx-react-lite': { observer: component => component },
+        '@styles': { selectOptionColors },
+    }, { document: { body: {} } }).default;
+    const profiles = [
+        { id: 'profile-one', label: 'Default' },
+        { id: 'profile-two', label: 'Work' },
+        { id: 'profile-three', label: 'Work' },
+    ];
+    let changed;
+    const render = value => Selector({
+        options: profiles, value, onChange: option => { changed = option; },
+    }).props;
+    const props = render({ ...profiles[1] });
+    const key = props.getOptionValue;
+    assert.deepEqual(profiles.map(key), ['profile-one', 'profile-two', 'profile-three']);
+    const selected = profiles.filter(option => key(option) === key(props.value));
+    assert.deepEqual(selected, [profiles[1]], 'only the selected ID, not every missing .value, should match');
+    assert.equal(key({ ...profiles[1], label: 'Renamed' }), 'profile-two');
+    props.onChange(profiles[2]);
+    assert.equal(changed.id, 'profile-three');
+    const switched = render(changed);
+    assert.deepEqual(profiles.filter(option => key(option) === key(switched.value)), [profiles[2]]);
+    assert.equal(key({ label: 'OpenVPN', value: 'OpenVPN' }), 'OpenVPN');
+    assert.equal(key({ label: 'Default', value: 0 }), '0');
+    const selectedStyle = selectOptionColors.option({}, { isSelected: true, isFocused: false });
+    const normalStyle = selectOptionColors.option({}, { isSelected: false, isFocused: false });
+    const hoverStyle = selectOptionColors.option({}, { isSelected: false, isFocused: true });
+    assert.equal(selectedStyle.backgroundColor, '#237be7');
+    assert.equal(normalStyle.backgroundColor, '#0d1422');
+    assert.equal(hoverStyle.backgroundColor, '#162035');
+    assert.equal(selectOptionColors.option({}, { isSelected: true, isFocused: true }).backgroundColor,
+        selectedStyle.backgroundColor, 'hover must preserve the selected highlight');
+    for (const file of ['Menu.jsx', 'MainPage.jsx']) {
+        const source = fs.readFileSync(path.join(root, 'app/renderer/components', file), 'utf8');
+        assert(source.includes('<ValueSelector'), `${file} must use the shared fixed selector`);
+    }
+});
 test('split tunnelling expands, preserves drafts, validates and saves comma-separated rules per profile', () => {
     const { JSDOM } = toolRequire('jsdom');
     const React = toolRequire('react');

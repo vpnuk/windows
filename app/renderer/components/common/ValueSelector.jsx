@@ -10,6 +10,7 @@ const ValueSelector = ({ options, onChange, defaultValue = undefined, value = un
         options={options}
         value={value}
         defaultValue={defaultValue}
+        getOptionValue={option => String(option.id === undefined ? option.value : option.id)}
         getOptionLabel={option => option.label}
         formatOptionLabel={formatOptionLabel}
         onChange={value => onChange(value)}
