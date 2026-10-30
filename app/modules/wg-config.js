@@ -63,11 +63,13 @@ async function releasePending(profile) {
 async function createConfig(profile) {
     bypassPrefixes(profile.bypassIps);
     const file = confPath(profile);
-    removeLocalConfig(profile); // never start a stale config after a failed fetch
-    // Compatibility rollback: get_config already reuses this device's registered
-    // peer. Do not delete it first: new keys also change Windows' adapter GUID.
-    // Remote deletion is now reserved for explicit uninstall cleanup.
+    let oldEndpoint = null;
+    if (fs.existsSync(file)) oldEndpoint = endpointIp(fs.readFileSync(file, 'utf8'));
+    removeLocalConfig(profile); // a failed API request must never reuse old keys
+    if (oldEndpoint && oldEndpoint !== profile.server?.host) await releaseConfig(profile, oldEndpoint);
+    // Recover this exact device's pending peers before requesting fresh keys.
     deviceLabel();
+    await releasePending(profile);
     const data = await request('get_config', profile);
     if (typeof data.config !== 'string' || !/^\[Interface\]/m.test(data.config) || !/^PrivateKey\s*=/m.test(data.config)) {
         throw new Error('WireGuard API did not return a valid configuration.');

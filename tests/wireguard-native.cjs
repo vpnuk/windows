@@ -18,7 +18,6 @@ const originalLoad = Module._load;
 let apiConfigs = 0;
 let apiDeletes = 0;
 const peer = crypto.randomBytes(32).toString('base64');
-const deviceKey = crypto.randomBytes(32).toString('base64');
 Module._load = function (name, parent, isMain) {
     if (name === 'axios' && parent.filename.endsWith(path.join('modules', 'wg-config.js'))) {
         return { post: async (url, body) => {
@@ -31,7 +30,7 @@ Module._load = function (name, parent, isMain) {
             apiConfigs++;
             return { data: { config: [
                 '[Interface]',
-                `PrivateKey = ${deviceKey}`,
+                `PrivateKey = ${crypto.randomBytes(32).toString('base64')}`,
                 'Address = 10.254.254.253/32', 'MTU = 1380', '[Peer]',
                 `PublicKey = ${peer}`,
                 // Never redirect the runner's internet, set DNS or use a real
@@ -70,7 +69,7 @@ let priorConfig = null;
             assert.equal(serviceState('shared'), 4);
             const configPath = settingsPath.wgConf('shared', null, profile.id);
             const config = fs.readFileSync(configPath, 'utf8');
-            if (priorConfig) assert.equal(config, priorConfig, 'reconnect must preserve the registered adapter identity');
+            if (priorConfig) assert.notEqual(config, priorConfig, 'reconnect must use fresh keys');
             priorConfig = config;
             const adapter = cp.spawnSync('powershell.exe', [
                 '-NoProfile', '-NonInteractive', '-Command',
@@ -84,9 +83,9 @@ let priorConfig = null;
             connection = null;
         }
         assert.equal(apiConfigs, 2);
-        assert.equal(apiDeletes, 0, 'normal sessions must not delete the registered peer');
+        assert.equal(apiDeletes, 4);
         assert(readLog(profile.id).includes('[WireGuard native]'), 'native diagnostics must reach the profile log');
-        console.log('PASS reusable-key reconnect and native log capture (no live VPN handshake tested)');
+        console.log('PASS fresh-key reconnect and native log capture (no live VPN handshake tested)');
     } catch (error) {
         console.error('Native WireGuard lifecycle check failed:', error.message);
         console.error(readLog(profile.id));

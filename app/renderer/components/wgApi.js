@@ -16,7 +16,7 @@ async function ensureWgConfig(profile, onStatus) {
             throw new Error('Enter your VPN username and password first.');
         }
         bypassPrefixes(profile.bypassIps);
-        if (onStatus) onStatus('Preparing WireGuard — loading this device’s configuration…');
+        if (onStatus) onStatus('Preparing WireGuard — a fresh config will be generated on connect…');
         return await ipcRenderer.invoke('wg-preflight');
     } catch (error) { return { success: false, error: error.message }; }
 }

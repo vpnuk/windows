@@ -99,18 +99,32 @@ async function stopSessionTunnel(tunnel, wgExe) {
 }
 
 function findOwnedTunnels() {
-    const script = "Get-CimInstance Win32_Service | Where-Object { $_.Name.StartsWith('WireGuardTunnel$') } | Select-Object Name,PathName | ConvertTo-Json -Compress";
-    const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    const result = run('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], 15000);
-    if (result.status !== 0) throw new Error('Could not inspect orphaned WireGuard services.');
-    const value = result.stdout.trim() ? JSON.parse(result.stdout) : [];
-    const services = Array.isArray(value) ? value : [value];
+    // Avoid PowerShell/CIM startup entirely. A slow/unavailable WMI provider
+    // must not prevent startup cleanup on an otherwise usable Windows system.
+    const result = run('sc.exe', ['query', 'type=', 'service', 'state=', 'all', 'bufsize=', '262144']);
+    if (result.status !== 0) throw new Error('Could not enumerate WireGuard services. Cleanup was not completed.');
+    // Match the stable service-name value, not the localized field label.
+    const names = [...new Set(
+        [...String(result.stdout || '').matchAll(/^[^:\r\n]+:\s*(WireGuardTunnel\$[a-zA-Z0-9_=+.-]{1,64})[ \t]*\r?$/gm)]
+            .map(match => match[1])
+    )];
     const folder = settingsFolder.toLowerCase().replace(/\//g, '\\') + '\\';
-    return services.filter(service => {
-        // Proof of ownership is the config path, not merely WireGuard's name.
-        const binaryPath = String(service.PathName || '').toLowerCase().replace(/\//g, '\\');
-        return binaryPath.includes('"' + folder) || binaryPath.includes(' ' + folder);
-    }).map(service => String(service.Name).slice('WireGuardTunnel$'.length));
+    const owned = [];
+    for (const name of names) {
+        const config = run('sc.exe', ['qc', name]);
+        if (config.status === 1060) continue; // removed between enumeration/query
+        if (config.status !== 0) throw new Error('Could not verify WireGuard service ownership. Cleanup was not completed.');
+        // Only inspect the command containing /tunnelservice; a display name
+        // or a similar folder name is not proof that this app owns a tunnel.
+        const command = String(config.stdout || '').split(/\r?\n/)
+            .find(line => /\/tunnelservice(?:[ \t]|$)/i.test(line));
+        const argument = String(command || '').match(/\/tunnelservice[ \t]+(?:"([^"]+)"|([^ \t\r\n]+))/i);
+        const configPath = argument && (argument[1] || argument[2]);
+        if (configPath && path.win32.dirname(configPath).toLowerCase() + '\\' === folder) {
+            owned.push(name.slice('WireGuardTunnel$'.length));
+        }
+    }
+    return owned;
 }
 
 function cleanupOwnedTunnels(wgExe) {

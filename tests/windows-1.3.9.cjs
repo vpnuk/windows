@@ -424,6 +424,7 @@ test('WireGuard config transforms only AllowedIPs, leaving keys and endpoints in
 function configFixture(failAction, deleteResult = { deleted: true, cleanup_confirmed: true }) {
     const folder = temp();
     const calls = [];
+    let serial = 0;
     const settingsPath = { folder, device: path.join(folder, 'device.json'), wgRecoveryFolder: path.join(temp(), 'recovery'), wgConf: () => path.join(folder, 'shared.conf') };
     const recovery = load('app/modules/wg-recovery.js', { './constants': { settingsPath } });
     const api = load('app/modules/wg-config.js', {
@@ -435,13 +436,13 @@ function configFixture(failAction, deleteResult = { deleted: true, cleanup_confi
             calls.push({ url, action: input.get('action'), server: input.get('server'), device: input.get('device_label') });
             if (input.get('action') === failAction) return { data: { error: 'API rejected request' } };
             return { data: input.get('action') === 'delete_config' ? deleteResult : {
-                config: `[Interface]\nPrivateKey = test-existing-device-key\nAddress = 10.0.0.2/32\n[Peer]\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = uk1.example.test:51820\n`,
+                config: `[Interface]\nPrivateKey = test-key-${++serial}\nAddress = 10.0.0.2/32\n[Peer]\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = uk1.example.test:51820\n`,
             } };
         } },
     });
     return { api, recovery, settingsPath, calls, profile: { credentials: { login: 'test', password: 'test' }, server: { host: '203.0.113.1' }, bypassIps: ['192.168.1.0/24'], details: { mtu: { value: 1380 } } } };
 }
-test('cleared app data recovers the same identity and reuses its server config without deleting it', async () => {
+test('cleared app data recovers the same identity and releases its old peer before replacement', async () => {
     const f = configFixture();
     await f.api.createConfig(f.profile);
     const label = f.calls[0].device;
@@ -449,7 +450,7 @@ test('cleared app data recovers the same identity and reuses its server config w
     f.calls.length = 0;
     await f.api.createConfig(f.profile);
     assert.deepEqual(f.calls.map(c => [c.action, c.device]), [
-        ['get_config', label],
+        ['delete_config', label], ['get_config', label],
     ]);
     const saved = fs.readFileSync(path.join(f.settingsPath.wgRecoveryFolder, 'devices.json'), 'utf8');
     assert.deepEqual(JSON.parse(saved), { labels: [label] });
@@ -460,7 +461,6 @@ test('legacy uninstaller identity backup is recovered and all known labels are c
     fs.mkdirSync(f.settingsPath.wgRecoveryFolder);
     fs.writeFileSync(path.join(f.settingsPath.wgRecoveryFolder, 'device.json'), JSON.stringify({ label: 'win-1234abcd' }));
     f.recovery.remember(['win-87654321']);
-    await f.api.releasePending(f.profile);
     await f.api.createConfig(f.profile);
     assert.deepEqual(f.calls.map(c => [c.action, c.device]), [
         ['delete_config', 'win-87654321'],
@@ -535,14 +535,14 @@ test('silent and interactive uninstall run cleanup before removing application f
     assert(!page.includes('RMDir /r "$APPDATA\\VPNUK"'));
     assert(!hook.includes('password') && !hook.includes('credentials.login'));
 });
-test('reconnect reuses the registered keys and device identity without deleting a server peer', async () => {
+test('reconnect creates fresh keys with stable device identity after confirmed peer deletion', async () => {
     const f = configFixture();
     await f.api.createConfig(f.profile);
     const first = fs.readFileSync(f.settingsPath.wgConf(), 'utf8');
     await f.api.createConfig(f.profile);
     const second = fs.readFileSync(f.settingsPath.wgConf(), 'utf8');
-    assert.equal(first, second);
-    assert.deepEqual(f.calls.map(c => c.action), ['get_config', 'get_config']);
+    assert.notEqual(first, second);
+    assert.deepEqual(f.calls.map(c => c.action), ['delete_config', 'get_config', 'delete_config', 'get_config']);
     assert.equal(new Set(f.calls.map(c => c.device)).size, 1);
     assert(second.includes('Endpoint = 203.0.113.1:51820'));
     assert(second.includes('MTU = 1380'));
@@ -550,7 +550,7 @@ test('reconnect reuses the registered keys and device identity without deleting 
     f.api.removeLocalConfig(f.profile);
     assert(!fs.existsSync(f.settingsPath.wgConf()));
 });
-test('upgrading preserves an existing eight-character win label without replacing its registered peer', async () => {
+test('upgrading preserves the existing win label while replacing only its own registered peer', async () => {
     const f = configFixture();
     const label = 'win-1234abcd';
     const identity = JSON.stringify({ label });
@@ -558,14 +558,15 @@ test('upgrading preserves an existing eight-character win label without replacin
     fs.writeFileSync(f.settingsPath.wgConf(), 'old-private-key');
     await f.api.createConfig(f.profile);
     assert.deepEqual(f.calls.map(c => [c.action, c.device, c.server]), [
+        ['delete_config', label, ''],
         ['get_config', label, '203.0.113.1'],
     ]);
     assert.equal(fs.readFileSync(f.settingsPath.device, 'utf8'), identity);
     assert(!fs.readFileSync(f.settingsPath.wgConf(), 'utf8').includes('old-private-key'));
     await f.api.releaseConfig(f.profile);
     f.api.removeLocalConfig(f.profile);
-    assert.equal(f.calls[1].action, 'delete_config');
-    assert.equal(f.calls[1].device, label);
+    assert.equal(f.calls[2].action, 'delete_config');
+    assert.equal(f.calls[2].device, label);
     assert(!fs.existsSync(f.settingsPath.wgConf()));
     assert.equal(fs.readFileSync(f.settingsPath.device, 'utf8'), identity);
 });
@@ -592,13 +593,13 @@ test('failed config retrieval cannot start stale local keys', async () => {
     fs.writeFileSync(f.settingsPath.wgConf(), 'old-private-key');
     await assert.rejects(() => f.api.createConfig(f.profile));
     assert(!fs.existsSync(f.settingsPath.wgConf()));
-    assert.deepEqual(f.calls.map(c => c.action), ['get_config']);
+    assert.deepEqual(f.calls.map(c => c.action), ['delete_config', 'get_config']);
 });
-test('switching server requests only the selected endpoint without destructive peer deletion', async () => {
+test('switching server releases the old endpoint and pending device peer before replacement', async () => {
     const f = configFixture();
     fs.writeFileSync(f.settingsPath.wgConf(), '[Peer]\nEndpoint = 198.51.100.8:51820\n');
     await f.api.createConfig(f.profile);
-    assert.deepEqual(f.calls.map(c => c.server), ['203.0.113.1']);
+    assert.deepEqual(f.calls.map(c => c.server), ['198.51.100.8', '', '203.0.113.1']);
 });
 
 function tunnelFixture(states, services = []) {
@@ -610,7 +611,15 @@ function tunnelFixture(states, services = []) {
         child_process: { spawnSync: (file, args, opts) => {
             assert.equal(opts.shell, false);
             calls.push({ file, args });
-            if (file === 'powershell.exe') return { status: 0, stdout: JSON.stringify(services) };
+            assert.notEqual(file, 'powershell.exe', 'startup service scanning must not depend on PowerShell/CIM');
+            if (args[0] === 'query' && args.includes('type=')) {
+                return { status: 0, stdout: services.map(s => `SERVICE_NAME: ${s.Name}\r\n`).join('') };
+            }
+            if (args[0] === 'qc') {
+                const service = services.find(s => s.Name === args[1]);
+                return service ? { status: 0, stdout: `BINARY_PATH_NAME : ${service.PathName}\r\n` }
+                    : { status: 1060, stdout: '' };
+            }
             if (args[0] === 'query') {
                 if (states.length) lastState = states.shift();
                 return lastState === null ? { status: 1060, stdout: 'FAILED 1060' }
@@ -704,6 +713,64 @@ test('startup cleanup distinguishes VPNUK config paths from other WireGuard appl
     ]);
     assert.deepEqual(json(f.tunnel.findOwnedTunnels()), ['shared']);
 });
+test('native service discovery handles localized labels without invoking PowerShell', () => {
+    const commands = [];
+    const api = load('app/main/utils/wg-tunnels.js', {
+        '../../modules/constants': { settingsFolder: 'C:\\Users\\test\\AppData\\Roaming\\VPNUK' },
+        child_process: { spawnSync: (file, args) => {
+            commands.push(args[0]);
+            assert.equal(file, 'sc.exe');
+            if (args[0] === 'query') return { status: 0, stdout: 'NOM_SERVICE: WireGuardTunnel$shared\r\nNOM_AFFICHAGE: WireGuard Tunnel: shared\r\n' };
+            assert.deepEqual(json(args), ['qc', 'WireGuardTunnel$shared']);
+            return { status: 0, stdout: 'CHEMIN_BINAIRE : "C:\\Program Files\\WireGuard\\wireguard.exe" /tunnelservice "C:\\Users\\test\\AppData\\Roaming\\VPNUK\\shared.conf"\r\n' };
+        } },
+    });
+    assert.deepEqual(json(api.findOwnedTunnels()), ['shared']);
+    assert.deepEqual(commands, ['query', 'qc']);
+});
+test('service discovery excludes similar folders, nested folders and unrelated command arguments', () => {
+    const f = tunnelFixture([], [
+        { Name: 'WireGuardTunnel$similar', PathName: '"C:\\WireGuard\\wireguard.exe" /tunnelservice "C:\\Users\\test\\AppData\\Roaming\\VPNUK-Other\\shared.conf"' },
+        { Name: 'WireGuardTunnel$nested', PathName: '"C:\\WireGuard\\wireguard.exe" /tunnelservice "C:\\Users\\test\\AppData\\Roaming\\VPNUK\\OtherVPN\\shared.conf"' },
+        { Name: 'WireGuardTunnel$argument', PathName: '"C:\\WireGuard\\wireguard.exe" /tunnelservice "C:\\OtherVPN\\shared.conf" "C:\\Users\\test\\AppData\\Roaming\\VPNUK\\shared.conf"' },
+    ]);
+    assert.deepEqual(json(f.tunnel.findOwnedTunnels()), []);
+    assert(!f.calls.some(c => c.args[0] === 'stop' || c.args[0] === 'delete'));
+});
+test('failed or incomplete service enumeration retains configs instead of pretending cleanup completed', () => {
+    for (const status of [5, 234]) {
+        const api = load('app/main/utils/wg-tunnels.js', {
+            '../../modules/constants': { settingsFolder: 'C:\\VPNUK' },
+            fs: { existsSync: () => { throw new Error('must not touch configs after failed enumeration'); } },
+            child_process: { spawnSync: (file, args) => {
+                assert.equal(file, 'sc.exe');
+                assert.equal(args[0], 'query');
+                return { status, stdout: 'SERVICE_NAME: WireGuardTunnel$shared\r\n' };
+            } },
+        });
+        assert.throws(() => api.cleanupOwnedTunnels(null), /Could not enumerate/);
+    }
+});
+test('a tunnel removed during native enumeration is harmless but ownership lookup errors block cleanup', () => {
+    for (const status of [1060, 5]) {
+        const api = load('app/main/utils/wg-tunnels.js', {
+            '../../modules/constants': { settingsFolder: 'C:\\VPNUK' },
+            child_process: { spawnSync: (file, args) => {
+                assert.equal(file, 'sc.exe');
+                return args[0] === 'query'
+                    ? { status: 0, stdout: 'SERVICE_NAME: WireGuardTunnel$shared\r\n' }
+                    : { status, stdout: '' };
+            } },
+        });
+        if (status === 1060) assert.deepEqual(json(api.findOwnedTunnels()), []);
+        else assert.throws(() => api.findOwnedTunnels(), /verify WireGuard service ownership/);
+    }
+});
+test('unconfirmed remote deletion blocks fresh key generation rather than consuming another slot', async () => {
+    const f = configFixture(undefined, { deleted: true, cleanup_confirmed: false });
+    await assert.rejects(() => f.api.createConfig(f.profile), /did not confirm config deletion/);
+    assert.deepEqual(f.calls.map(c => c.action), ['delete_config']);
+});
 
 function lifecycleFixture({ offlineCleanup = false, stopFails = false, states = [4], nativeOutput = [] } = {}) {
     const events = [];
@@ -781,7 +848,7 @@ test('WireGuard serializes connect/disconnect and deletes keys only after stoppi
     assert.equal(f.vpn.getConnectionStatus(), 'Disconnected');
     assert(f.events.indexOf('new-config') < f.events.indexOf('service-installed'));
     assert(f.events.indexOf('connected') < f.events.indexOf('keys-removed'));
-    assert(!f.events.includes('remote-release'), 'disconnect must retain the reusable server peer');
+    assert(f.events.indexOf('keys-removed') < f.events.indexOf('remote-release'));
     assert(f.events.includes('disconnected'));
     assert(!f.events.includes('orphans-cleaned'), 'normal connects must not sweep all profiles');
     assert(f.events.indexOf('native-log-read') < f.events.indexOf('keys-removed'));
@@ -826,12 +893,13 @@ test('an unsuccessful driver stop does not delete keys or report a clean disconn
     assert(!other.events.includes('disconnected'));
     await f.vpn.disconnect();
 });
-test('normal disconnect removes local keys without needing a remote deletion request', async () => {
+test('offline remote deletion still removes local keys and reports pending server cleanup', async () => {
     const f = lifecycleFixture({ offlineCleanup: true });
     await f.vpn.connect();
     await f.vpn.disconnect();
     assert(f.events.includes('keys-removed'));
-    assert(!f.events.includes('remote-release'));
+    assert(f.events.includes('remote-release'));
+    assert(f.events.some(event => event.includes('Server-side cleanup could not finish')));
     assert.equal(f.vpn.getConnectionStatus(), 'Disconnected');
 });
 test('profile hydration completes before observing; nested edits and explicit saves are immediate', () => {

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { connectionStates } = require('../../modules/constants');
 const VpnBase = require('./VpnBase');
-const { createConfig, removeLocalConfig, confPath } = require('../../modules/wg-config');
+const { createConfig, releaseConfig, removeLocalConfig, confPath } = require('../../modules/wg-config');
 const { serviceState, stopSessionTunnel, cleanupOwnedTunnels } = require('../utils/wg-tunnels');
 const { cleanupBypassRoutes } = require('../utils/bypass-routes');
 const { createDiagnostics, startupFailure } = require('../utils/wg-diagnostics');
@@ -69,11 +69,21 @@ class WireGuard extends VpnBase {
         cleanupBypassRoutes();
         this.#status = connectionStates.disconnected;
         this._disconnectedHook?.(intentional);
-        // Restore 1.3.8's reusable server peer. Local keys are removed, but
-        // get_config can return the same registered keys on the next connect.
-        // Uninstall has its own confirmed remote cleanup and recovery journal.
-        this.#log('Local WireGuard config removed; server config retained for reconnect.\n');
-        this.#closeLog();
+        if (!intentional && this.#profile.killSwitchEnabled) {
+            this.#log('Remote peer cleanup deferred while the kill switch blocks internet access.\n');
+            this.#closeLog();
+            return;
+        }
+        try {
+            // An API request may create a peer before its response is lost.
+            // Release only this exact device label, across its own servers.
+            await releaseConfig(this.#profile, '');
+        } catch (error) {
+            this.#log(`WireGuard remote config cleanup failed: ${error.message}\n`);
+            this._errorHook?.(new Error('Local WireGuard config removed. Server-side cleanup could not finish; it will be retried before the next connection.'));
+        } finally {
+            this.#closeLog();
+        }
     }
 
     connect() {
@@ -90,7 +100,7 @@ class WireGuard extends VpnBase {
                 // Startup recovery handles owned orphaned services once.
                 // Normal reconnect must not sweep every profile/config again.
                 await stopSessionTunnel(this.#tunnelName, exe);
-                this.#log('Loading this device’s WireGuard config without replacing its registered keys.\n');
+                this.#log('Requesting a new WireGuard config for this connection.\n');
                 const config = await createConfig(this.#profile);
                 this.#server = config.server;
                 // Import existing history for this profile but don't classify a
