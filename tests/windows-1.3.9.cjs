@@ -39,8 +39,137 @@ function load(relative, mocks = {}, globals = {}) {
 
 const arch = require('../app/modules/windows-arch');
 const bypass = require('../app/modules/ip-bypass');
+test('WireGuard diagnostics include the native adapter failure, exclude other tunnels, redact keys and avoid duplicate reads', async () => {
+    const entries = [];
+    let callback;
+    let reads = 0;
+    const native = [
+        '2026-10-30 05:00:07: [MGR] Starting UI process for another account',
+        '2026-10-30 05:00:07: [TUN] [other] private message',
+        '2026-10-30 05:00:30: [TUN] [vpnuk-test] Timed out waiting for device query: The wait operation timed out. (Code 0x00000102)',
+        '2026-10-30 05:00:30: [TUN] [vpnuk-test] Unable to create network adapter: Error creating adapter: The device is not ready for use.',
+        `2026-10-30 05:00:30: [TUN] [vpnuk-test] PrivateKey = ${'A'.repeat(43)}=`,
+    ].join('\r\n');
+    const api = load('app/main/utils/wg-diagnostics.js', {
+        child_process: { execFile: (file, args, options, cb) => {
+            reads++;
+            assert.equal(file, 'wireguard.exe');
+            assert.deepEqual(json(args), ['/dumplog']);
+            assert.equal(options.shell, false);
+            assert(options.timeout > 0 && options.maxBuffer > 0);
+            callback = cb;
+        } },
+    });
+    const refresh = api.createDiagnostics('wireguard.exe', 'vpnuk-test', line => entries.push(line));
+    const first = refresh();
+    const concurrent = refresh();
+    assert.equal(reads, 1);
+    callback(null, native);
+    const lines = await first;
+    await concurrent;
+    assert.equal(lines.length, 3);
+    assert(api.startupFailure(lines).includes('Windows network adapter'));
+    assert(!entries.join('').includes('another account'));
+    assert(!entries.join('').includes('private message'));
+    assert(!entries.join('').includes('A'.repeat(43)));
+    assert(entries.join('').includes('[redacted]'));
+    const repeat = refresh();
+    callback(null, native);
+    assert.equal((await repeat).length, 0);
+    assert.equal(entries.length, 3);
+    const failure = refresh();
+    callback(Object.assign(new Error('private details must not be logged'), { code: 'ENOENT' }), '');
+    await failure;
+    assert(entries[3].includes('Diagnostic log unavailable'));
+    assert(!entries.join('').includes('private details'));
+    const recovered = refresh();
+    callback(null, native + '\r\n2026-10-30 05:00:31: [TUN] [vpnuk-test] Shutting down');
+    assert.equal((await recovered).length, 1);
+});
+test('connection log readers are bounded and append writers cannot overwrite native diagnostics', async () => {
+    const folder = temp();
+    const api = load('app/main/utils/logs.js', { '../../modules/constants': { settingsFolder: folder } });
+    const stream = api.getLogFileStream('profile');
+    const write = line => new Promise(resolve => stream.write(line, resolve));
+    await write('Wrapper start\n');
+    api.appendToLog('profile', '[WireGuard native] adapter failure');
+    await write('Wrapper end\n');
+    await new Promise(resolve => stream.end(resolve));
+    const text = api.readLog('profile');
+    assert(text.includes('Wrapper start') && text.includes('adapter failure') && text.includes('Wrapper end'));
+    assert(text.indexOf('adapter failure') < text.indexOf('Wrapper end'));
+    assert.equal(api.readLog('missing'), '');
+    assert.throws(() => api.readLog('../another-profile'));
+    assert.throws(() => api.readLog(null));
+    fs.writeFileSync(path.join(folder, 'logs', 'large.log'), 'x'.repeat(300000) + 'latest error');
+    const bounded = api.readLog('large');
+    assert(bounded.length < 263000 && bounded.endsWith('latest error'));
+});
+test('the in-app Log tab loads native errors, refreshes, switches profiles and stops polling when hidden', async () => {
+    const { JSDOM } = toolRequire('jsdom');
+    const React = toolRequire('react');
+    const dom = new JSDOM('<!doctype html><div id="root"></div>', { pretendToBeVisual: true });
+    const oldGlobals = {};
+    for (const name of ['window', 'document', 'navigator', 'MessageChannel']) {
+        oldGlobals[name] = Object.getOwnPropertyDescriptor(global, name);
+        Object.defineProperty(global, name, { configurable: true, value: dom.window[name] });
+    }
+    const ReactDOM = toolRequire('react-dom');
+    const { act, Simulate } = toolRequire('react-dom/test-utils');
+    const container = dom.window.document.getElementById('root');
+    const calls = [];
+    let poll;
+    let fail = false;
+    const Component = load('app/renderer/components/ConnectionLog.jsx', {
+        react: React, electron: { ipcRenderer: {
+            invoke: async (channel, id) => {
+                calls.push([channel, id]);
+                if (fail) throw new Error('read failed');
+                return { success: true, text: `${id}: [WireGuard native] Unable to create network adapter` };
+            },
+            send: (channel, id) => calls.push([channel, id]),
+        } },
+    }, {
+        setInterval: callback => { poll = callback; return 1; },
+        clearInterval: () => { poll = null; },
+    }).default;
+    const render = async (profileId, active) => act(async () => {
+        ReactDOM.render(React.createElement(Component, { profileId, active }), container);
+    });
+    try {
+        await render('first', true);
+        assert(container.querySelector('pre').textContent.includes('first: [WireGuard native]'));
+        assert.equal(container.querySelector('pre').style.whiteSpace, 'pre-wrap');
+        await act(async () => Simulate.click(container.querySelectorAll('button')[0]));
+        assert.equal(calls.filter(c => c[0] === 'log-read').length, 2);
+        act(() => Simulate.click(container.querySelectorAll('button')[1]));
+        assert.deepEqual(calls[calls.length - 1], ['log-open', 'first']);
+        await render('second', true);
+        assert(container.querySelector('pre').textContent.startsWith('second:'));
+        fail = true;
+        await act(async () => poll());
+        assert(container.querySelector('[role="alert"]'));
+        fail = false;
+        await act(async () => poll());
+        assert(!container.querySelector('[role="alert"]'));
+        if (process.env.WINDOWS_LOG_PREVIEW) {
+            fs.writeFileSync(process.env.WINDOWS_LOG_PREVIEW, '<!doctype html><html><head><style>:root{--text:#dce6f2;--text-muted:#9cacc1}body{background:#0d1422;color:var(--text);font:14px Arial;padding:20px;max-width:470px}.form-button-sm{background:#162035;color:var(--text);border:1px solid #415573;border-radius:16px;padding:8px 12px}</style></head><body><h3>VPNUK — Connection Log</h3>' + container.innerHTML + '</body></html>');
+        }
+        await render('second', false);
+        assert.equal(poll, null);
+        const menu = fs.readFileSync(path.join(root, 'app/renderer/components/Menu.jsx'), 'utf8');
+        assert(menu.includes('<ConnectionLog profileId={profile.id} active={activeTab === \'log\'}'));
+    } finally {
+        act(() => { ReactDOM.unmountComponentAtNode(container); });
+        dom.window.close();
+        for (const [name, descriptor] of Object.entries(oldGlobals)) {
+            if (descriptor) Object.defineProperty(global, name, descriptor);
+            else delete global[name];
+        }
+    }
+});
 const constants = require('../app/modules/constants');
-test('real UUID profiles produce stable, distinct WireGuard tunnel names within the 32-character limit', () => {
+test('real UUID profiles retain the short working 1.3.8 tunnel names without changing saved profile identities', () => {
     const ids = [
         '8a6145bb-e4cd-4bc8-b42e-b7d73cf370aa',
         '8a6145bb-e4cd-4bc8-b42e-b7d73cf370ab',
@@ -49,9 +178,9 @@ test('real UUID profiles produce stable, distinct WireGuard tunnel names within 
     ];
     const names = ids.map(id => path.basename(constants.settingsPath.wgConf('shared', null, id), '.conf'));
     for (const name of names) assert(/^[a-zA-Z0-9_=+.-]{1,32}$/.test(name), `WireGuard rejects ${name}`);
-    assert.equal(new Set(names).size, ids.length);
-    assert.equal(constants.settingsPath.wgConf('shared', null, ids[0]),
-        constants.settingsPath.wgConf('dedicated', 'another-server', ids[0]));
+    assert(names.every(name => name === 'shared'));
+    assert.equal(path.basename(constants.settingsPath.wgConf('dedicated', null, ids[0])), 'dedicated.conf');
+    assert.equal(path.basename(constants.settingsPath.wgConf('dedicated11', null, ids[0])), '11dedicated.conf');
     assert.throws(() => constants.settingsPath.wgConf('shared', null, '../invalid'));
 });
 test('profile dropdowns distinguish unique IDs while preserving ordinary option values and hover colours', () => {
@@ -292,15 +421,18 @@ test('WireGuard config transforms only AllowedIPs, leaving keys and endpoints in
     assert.throws(() => bypass.applyWireGuardBypass('[Peer]\n', ['1.2.3.4']));
 });
 
-function configFixture(failAction, deleteResult = { deleted: true }) {
+function configFixture(failAction, deleteResult = { deleted: true, cleanup_confirmed: true }) {
     const folder = temp();
     const calls = [];
     let serial = 0;
-    const settingsPath = { folder, device: path.join(folder, 'device.json'), wgConf: () => path.join(folder, 'shared.conf') };
+    const settingsPath = { folder, device: path.join(folder, 'device.json'), wgRecoveryFolder: path.join(temp(), 'recovery'), wgConf: () => path.join(folder, 'shared.conf') };
+    const recovery = load('app/modules/wg-recovery.js', { './constants': { settingsPath } });
     const api = load('app/modules/wg-config.js', {
         './constants': { settingsPath },
+        './wg-recovery': recovery,
         axios: { post: async (url, form) => {
             const input = new URLSearchParams(form);
+            assert.equal(input.get('confirm_peer_removal'), input.get('action') === 'delete_config' ? '1' : null);
             calls.push({ url, action: input.get('action'), server: input.get('server'), device: input.get('device_label') });
             if (input.get('action') === failAction) return { data: { error: 'API rejected request' } };
             return { data: input.get('action') === 'delete_config' ? deleteResult : {
@@ -308,8 +440,100 @@ function configFixture(failAction, deleteResult = { deleted: true }) {
             } };
         } },
     });
-    return { api, settingsPath, calls, profile: { credentials: { login: 'test', password: 'test' }, server: { host: '203.0.113.1' }, bypassIps: ['192.168.1.0/24'], details: { mtu: { value: 1380 } } } };
+    return { api, recovery, settingsPath, calls, profile: { credentials: { login: 'test', password: 'test' }, server: { host: '203.0.113.1' }, bypassIps: ['192.168.1.0/24'], details: { mtu: { value: 1380 } } } };
 }
+test('uninstall with cleared app data preserves identity and reclaims the old slot before creating a new config', async () => {
+    const f = configFixture();
+    await f.api.createConfig(f.profile);
+    const label = f.calls[0].device;
+    fs.rmSync(f.settingsPath.folder, { recursive: true });
+    f.calls.length = 0;
+    await f.api.createConfig(f.profile);
+    assert.deepEqual(f.calls.map(c => [c.action, c.device]), [
+        ['delete_config', label], ['get_config', label],
+    ]);
+    const saved = fs.readFileSync(path.join(f.settingsPath.wgRecoveryFolder, 'devices.json'), 'utf8');
+    assert.deepEqual(JSON.parse(saved), { labels: [label] });
+    assert(!saved.includes('password') && !saved.includes('PrivateKey') && !saved.includes('login'));
+});
+test('legacy uninstaller identity backup is recovered and all known labels are cleaned for the authenticated account', async () => {
+    const f = configFixture();
+    fs.mkdirSync(f.settingsPath.wgRecoveryFolder);
+    fs.writeFileSync(path.join(f.settingsPath.wgRecoveryFolder, 'device.json'), JSON.stringify({ label: 'win-1234abcd' }));
+    f.recovery.remember(['win-87654321']);
+    await f.api.createConfig(f.profile);
+    assert.deepEqual(f.calls.map(c => [c.action, c.device]), [
+        ['delete_config', 'win-87654321'],
+        ['delete_config', 'win-1234abcd'],
+        ['get_config', 'win-1234abcd'],
+    ]);
+});
+test('offline cleanup retains its journal and blocks new peer generation until retry succeeds', async () => {
+    const f = configFixture('delete_config');
+    await assert.rejects(() => f.api.createConfig(f.profile));
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.calls[0].action, 'delete_config');
+    assert.equal(f.recovery.labels()[0], f.calls[0].device);
+    fs.rmSync(f.settingsPath.folder, { recursive: true });
+    await assert.rejects(() => f.api.createConfig(f.profile));
+    assert(f.calls.every(c => c.action === 'delete_config'));
+    assert.equal(new Set(f.calls.map(c => c.device)).size, 1);
+});
+test('corrupt recovery records cannot silently create a replacement identity', async () => {
+    const f = configFixture();
+    fs.mkdirSync(f.settingsPath.wgRecoveryFolder);
+    fs.writeFileSync(path.join(f.settingsPath.wgRecoveryFolder, 'devices.json'), '{"labels":[""]}');
+    await assert.rejects(() => f.api.createConfig(f.profile), /device identity is invalid/);
+    assert.equal(f.calls.length, 0);
+});
+test('headless uninstall uses saved credentials only in memory and leaves retry metadata on API failure', async () => {
+    const f = configFixture();
+    f.recovery.deviceLabel();
+    const attempted = [];
+    const profiles = [
+        { credentials: { login: 'first', password: 'not-saved-in-recovery' } },
+        { credentials: { login: 'second', password: 'another-password' } },
+    ];
+    const cleanup = load('app/main/utils/wg-uninstall.js', {
+        'electron-store': class { get() { return JSON.stringify({ profiles: { WireGuard: profiles } }); } },
+        '../../modules/wg-recovery': f.recovery,
+        '../../modules/constants': { settingsPath: f.settingsPath },
+        '../../modules/wg-config': { releasePending: async profile => {
+            attempted.push(profile.credentials.login);
+            if (profile.credentials.login === 'first') throw new Error('offline');
+        } },
+        './bypass-routes': { cleanupBypassRoutes: () => {} },
+    });
+    assert.equal(await cleanup(), false);
+    assert.deepEqual(attempted, ['first', 'second']);
+    assert.equal(f.recovery.labels().length, 1);
+    const saved = fs.readFileSync(path.join(f.settingsPath.wgRecoveryFolder, 'devices.json'), 'utf8');
+    assert(!saved.includes('first') && !saved.includes('password'));
+});
+test('uninstall without a saved device never generates a new peer identity', async () => {
+    const f = configFixture();
+    const cleanup = load('app/main/utils/wg-uninstall.js', {
+        'electron-store': class { get() { throw new Error('should not need credentials'); } },
+        '../../modules/wg-recovery': f.recovery,
+        '../../modules/constants': { settingsPath: f.settingsPath },
+        '../../modules/wg-config': {},
+    });
+    assert.equal(await cleanup(), true);
+    assert(!fs.existsSync(f.settingsPath.device));
+    assert.deepEqual(json(f.recovery.labels()), []);
+});
+test('silent and interactive uninstall run cleanup before removing application files and data', () => {
+    const nsis = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
+    const hook = nsis.match(/!macro customRemoveFiles[\s\S]*?!macroend/)[0];
+    const page = nsis.match(/Function un\.OvpnPageLeave[\s\S]*?FunctionEnd/)[0];
+    assert(hook.indexOf('CopyFiles /SILENT') < hook.indexOf('!insertmacro cleanupVpnukTunnels'));
+    assert(hook.indexOf('!insertmacro cleanupVpnukTunnels') < hook.indexOf('--cleanup-wireguard'));
+    assert(hook.indexOf('--cleanup-wireguard') < hook.indexOf('Delete "$APPDATA'));
+    assert(hook.indexOf('--cleanup-wireguard') < hook.indexOf('RMDir /r "$INSTDIR"'));
+    assert(!hook.includes('${Silent}'));
+    assert(!page.includes('RMDir /r "$APPDATA\\VPNUK"'));
+    assert(!hook.includes('password') && !hook.includes('credentials.login'));
+});
 test('every connect releases the old peer and fetches a new config with stable device identity', async () => {
     const f = configFixture();
     await f.api.createConfig(f.profile);
@@ -346,7 +570,7 @@ test('upgrading preserves an existing eight-character win label and deletes that
     assert.equal(fs.readFileSync(f.settingsPath.device, 'utf8'), identity);
 });
 test('missing or refused deletion acknowledgement blocks replacement config generation', async () => {
-    for (const response of [{ deleted: false }, { success: true }, 'unexpected response']) {
+    for (const response of [{ deleted: false }, { deleted: true }, { deleted: true, cleanup_confirmed: false }, { success: true }, 'unexpected response']) {
         const f = configFixture(undefined, response);
         fs.writeFileSync(f.settingsPath.wgConf(), 'old-private-key');
         await assert.rejects(() => f.api.createConfig(f.profile), /did not confirm config deletion/);
@@ -432,7 +656,7 @@ test('startup cleanup distinguishes VPNUK config paths from other WireGuard appl
     assert.deepEqual(json(f.tunnel.findOwnedTunnels()), ['shared']);
 });
 
-function lifecycleFixture({ offlineCleanup = false, stopFails = false } = {}) {
+function lifecycleFixture({ offlineCleanup = false, stopFails = false, states = [4], nativeOutput = [] } = {}) {
     const events = [];
     const profile = { id: '8a6145bb-e4cd-4bc8-b42e-b7d73cf370aa', credentials: { login: 'test', password: 'test' } };
     const file = constants.settingsPath.wgConf('shared', null, profile.id);
@@ -451,6 +675,16 @@ function lifecycleFixture({ offlineCleanup = false, stopFails = false } = {}) {
         './VpnBase': Base,
         fs: { existsSync: () => installed },
         '../utils/bypass-routes': { cleanupBypassRoutes: () => events.push('routes-removed') },
+        '../utils/wg-diagnostics': {
+            createDiagnostics: (exe, tunnel, write) => async () => {
+                events.push('native-log-read');
+                const lines = nativeOutput.shift() || [];
+                for (const line of lines) write(line);
+                return lines;
+            },
+            startupFailure: require('../app/main/utils/wg-diagnostics').startupFailure,
+        },
+        '../utils/logs': { appendToLog: (id, line) => events.push(`native:${line}`) },
         '../../modules/wg-config': {
             confPath: () => file,
             createConfig: async () => { events.push('new-config'); return { file, server: '203.0.113.1' }; },
@@ -461,7 +695,7 @@ function lifecycleFixture({ offlineCleanup = false, stopFails = false } = {}) {
             },
         },
         '../utils/wg-tunnels': {
-            serviceState: () => 4,
+            serviceState: () => states.length > 1 ? states.shift() : states[0],
             stopAndRemoveTunnel: (name, exe) => {
                 events.push(exe ? 'stop-with-exe' : 'stop-without-exe');
                 if (stopFails) throw new Error('Service did not stop');
@@ -478,7 +712,10 @@ function lifecycleFixture({ offlineCleanup = false, stopFails = false } = {}) {
             }
             return { status: 0, stdout: 'InstallationDirectory REG_SZ C:\\WireGuard' };
         } },
-    }, { setInterval: callback => { watcher = callback; return 1; }, clearInterval: () => {} });
+    }, {
+        setInterval: callback => { watcher = callback; return 1; }, clearInterval: () => {},
+        setTimeout: callback => { callback(); },
+    });
     const vpn = new WireGuard(profile, {
         connectingHook: () => events.push('connecting'),
         connectedHook: () => events.push('connected'),
@@ -497,6 +734,29 @@ test('WireGuard serializes connect/disconnect and deletes keys only after stoppi
     assert(f.events.indexOf('connected') < f.events.indexOf('keys-removed'));
     assert(f.events.indexOf('keys-removed') < f.events.indexOf('remote-release'));
     assert(f.events.includes('disconnected'));
+    assert(!f.events.includes('orphans-cleaned'), 'normal connects must not sweep all profiles');
+    assert(f.events.indexOf('native-log-read') < f.events.indexOf('keys-removed'));
+});
+test('slow adapter startup is awaited asynchronously beyond the former ten-second window', async () => {
+    const f = lifecycleFixture({ states: [...Array(24).fill(2), 4] });
+    await f.vpn.connect();
+    assert.equal(f.vpn.getConnectionStatus(), 'Connected');
+    await f.vpn.disconnect();
+});
+test('native adapter failure is captured before cleanup and reported without blaming credentials', async () => {
+    const failure = '[TUN] [shared] Unable to create network adapter: Error creating adapter: The device is not ready for use.';
+    const f = lifecycleFixture({ states: [1], nativeOutput: [[], [failure]] });
+    await assert.rejects(() => f.vpn.connect(), /Windows network adapter/);
+    assert(!f.events.includes('connected'));
+    assert(f.events.indexOf(`native:${failure}`) < f.events.indexOf('keys-removed'));
+    assert(f.events.some(event => event.includes('device is not ready')));
+});
+test('old native adapter errors do not make a new successful session fail', async () => {
+    const failure = '[TUN] [shared] Unable to create network adapter: Error creating adapter: The device is not ready for use.';
+    const f = lifecycleFixture({ nativeOutput: [[failure], []] });
+    await f.vpn.connect();
+    assert.equal(f.vpn.getConnectionStatus(), 'Connected');
+    await f.vpn.disconnect();
 });
 test('external uninstall while connected triggers watcher cleanup without wireguard.exe', async () => {
     const f = lifecycleFixture();

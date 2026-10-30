@@ -13,7 +13,9 @@ const getLogFileStream = id => {
     mkdirIfNotExistsSync(logDir);
     const logPath = getLogPath(id);
     isDev && console.log(logPath);
-    return fs.createWriteStream(logPath);
+    // Native diagnostics and IPC messages append independently. A positional
+    // writer would overwrite their entries on its next write.
+    return fs.createWriteStream(logPath, { flags: 'a' });
 };
 exports.getLogFileStream = getLogFileStream;
 
@@ -29,6 +31,21 @@ const appendToLog = (id, line) => {
     fs.appendFileSync(getLogPath(id), `[${ts}] ${line}\n`, 'utf-8');
 };
 exports.appendToLog = appendToLog;
+
+const readLog = id => {
+    if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) throw new Error('Invalid profile identity.');
+    const file = getLogPath(id);
+    if (!fs.existsSync(file)) return '';
+    const fd = fs.openSync(file, 'r');
+    try {
+        const size = fs.fstatSync(fd).size;
+        const length = Math.min(size, 256 * 1024);
+        const buffer = Buffer.alloc(length);
+        const read = fs.readSync(fd, buffer, 0, length, size - length);
+        return (size > length ? '[Earlier log entries omitted]\n' : '') + buffer.toString('utf8', 0, read);
+    } finally { fs.closeSync(fd); }
+};
+exports.readLog = readLog;
 
 const openLogFileExternal = id => {
     const logPath = getLogPath(id);

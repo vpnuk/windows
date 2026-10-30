@@ -314,6 +314,16 @@ ipcMain.on('log-open', (event, profileId) => {
     }
 });
 
+ipcMain.handle('log-read', async (_, profileId) => {
+    try {
+        if (typeof profileId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(profileId)) throw new Error('Invalid profile identity.');
+        await vpnConnection?.refreshDiagnostics?.(profileId);
+        return { success: true, text: require('./utils/logs').readLog(profileId) };
+    } catch {
+        return { success: false, error: 'Could not read the connection log.' };
+    }
+});
+
 ipcMain.on('default-gateway-request', async event => {
     event.sender.send('default-gateway-response', await getDefaultGateway());
 });

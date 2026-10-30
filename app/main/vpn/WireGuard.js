@@ -7,6 +7,8 @@ const VpnBase = require('./VpnBase');
 const { createConfig, releaseConfig, removeLocalConfig, confPath } = require('../../modules/wg-config');
 const { serviceState, stopAndRemoveTunnel, cleanupOwnedTunnels } = require('../utils/wg-tunnels');
 const { cleanupBypassRoutes } = require('../utils/bypass-routes');
+const { createDiagnostics, startupFailure } = require('../utils/wg-diagnostics');
+const { appendToLog } = require('../utils/logs');
 
 function getWireGuardExePath() {
     if (process.env.WG_EXT_PATH && process.env.ELECTRON_ENV === 'Dev') return process.env.WG_EXT_PATH;
@@ -26,6 +28,8 @@ function getWireGuardExePath() {
 class WireGuard extends VpnBase {
     #profile; #tunnelName; #status = connectionStates.disconnected;
     #watcher = null; #queue = Promise.resolve(); #server = null; #pending = 0; #logClosed = false;
+    #diagnostics = null;
+    #nativeFailure = null;
 
     constructor(profile, hooks) {
         super(profile, hooks);
@@ -57,8 +61,10 @@ class WireGuard extends VpnBase {
 
     async #removeSession(intentional) {
         this.#stopWatcher();
+        await this.refreshDiagnostics(this.#profile.id);
         // No early return if the external WireGuard application was uninstalled.
         stopAndRemoveTunnel(this.#tunnelName, this.#exeOrNull());
+        await this.refreshDiagnostics(this.#profile.id);
         removeLocalConfig(this.#profile);
         cleanupBypassRoutes();
         this.#status = connectionStates.disconnected;
@@ -72,7 +78,10 @@ class WireGuard extends VpnBase {
             return;
         }
         try {
-            await releaseConfig(this.#profile, this.#server === null ? undefined : this.#server);
+            // A request can create the peer and then fail before we learn its
+            // endpoint. Release this exact device across its servers, not just
+            // the currently selected server.
+            await releaseConfig(this.#profile, '');
         } catch (error) {
             // Local keys/service are already gone. Offline remote deletion must not
             // pretend it succeeded; the next connect releases this device slot again.
@@ -87,13 +96,23 @@ class WireGuard extends VpnBase {
         return this.#serialize(async () => {
             try {
                 const exe = getWireGuardExePath();
+                this.#diagnostics = createDiagnostics(exe, this.#tunnelName,
+                    line => {
+                        appendToLog(this.#profile.id, line.trimEnd());
+                        this.#nativeFailure = startupFailure([line]) || this.#nativeFailure;
+                    });
                 this.#status = connectionStates.connecting;
                 this._connectingHook?.();
-                cleanupOrphanedTunnels();
+                // Startup recovery handles owned orphaned services once.
+                // Normal reconnect must not sweep every profile/config again.
                 stopAndRemoveTunnel(this.#tunnelName, exe);
                 this.#log('Requesting a new WireGuard config for this connection.\n');
                 const config = await createConfig(this.#profile);
                 this.#server = config.server;
+                // Import existing history for this profile but don't classify a
+                // previous connection's error as this connection's failure.
+                await this.refreshDiagnostics(this.#profile.id);
+                this.#nativeFailure = null;
                 const result = cp.spawnSync(exe, ['/installtunnelservice', config.file],
                     { shell: false, windowsHide: true, timeout: 20000 });
                 if (result.error || result.status !== 0) {
@@ -106,10 +125,14 @@ class WireGuard extends VpnBase {
                     { shell: false, windowsHide: true, timeout: 10000 });
                 if (manual.status !== 0) throw new Error('Could not disable automatic WireGuard startup.');
                 let state = serviceState(this.#tunnelName);
-                for (let attempt = 0; state !== 4 && state !== null && attempt < 10; attempt++) {
-                    cp.spawnSync('ping.exe', ['-n', '2', '127.0.0.1'], { shell: false, windowsHide: true, timeout: 3000 });
+                for (let attempt = 0; state !== 4 && state !== 1 && state !== null && attempt < 45; attempt++) {
+                    // Adapter installation can outlast the old 10-second wait.
+                    // Don't freeze the main process while Windows initializes it.
+                    await new Promise(resolve => setTimeout(resolve, 1000));
                     state = serviceState(this.#tunnelName);
                 }
+                await this.refreshDiagnostics(this.#profile.id);
+                if (state !== 4 && this.#nativeFailure) throw new Error(this.#nativeFailure);
                 if (state !== 4) throw new Error('WireGuard tunnel service is not running.');
                 this.#status = connectionStates.connected;
                 this._connectedHook?.();
@@ -135,6 +158,10 @@ class WireGuard extends VpnBase {
     }
 
     disconnect() { return this.#serialize(() => this.#removeSession(true)); }
+    refreshDiagnostics(profileId) {
+        if (profileId !== this.#profile.id || !this.#diagnostics) return Promise.resolve([]);
+        return this.#diagnostics();
+    }
     getConnectionStatus() { return this.#status; }
     isBusy() { return this.#pending > 0; }
 }

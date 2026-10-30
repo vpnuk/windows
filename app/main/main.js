@@ -132,9 +132,18 @@ function createWindow() {
     });
 }
 
-const gotTheLock = app.requestSingleInstanceLock();
+const cleanupOnly = process.argv.includes('--cleanup-wireguard');
+const gotTheLock = !cleanupOnly && app.requestSingleInstanceLock();
 
-if (gotTheLock) {
+if (cleanupOnly) {
+    // Called before NSIS removes the executable or saved profiles. The
+    // uninstaller has already stopped owned tunnels. Never show a window or
+    // forward this command to an ordinary running app.
+    const deadline = setTimeout(() => app.exit(2), 60000);
+    app.whenReady().then(() => require('./utils/wg-uninstall')())
+        .then(complete => { clearTimeout(deadline); app.exit(complete ? 0 : 2); })
+        .catch(() => { clearTimeout(deadline); app.exit(2); });
+} else if (gotTheLock) {
     isIde && app.commandLine.appendSwitch('remote-debugging-port', '9223');
 
     app.on('second-instance', (event, commandLine) => {
@@ -210,4 +219,4 @@ isDev && process.on('uncaughtException', error => {
     console.log('uncaughtException', error);
 });
 
-require('./handlers');
+if (!cleanupOnly) require('./handlers');

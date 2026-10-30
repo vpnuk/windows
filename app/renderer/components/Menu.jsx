@@ -17,6 +17,7 @@ import { VpnType }         from '@modules/constants.js';
 import { Servers, useStore } from '@domain';
 import { isDev }           from '@app';
 import IpBypassSettings from './IpBypassSettings';
+import ConnectionLog from './ConnectionLog';
 
 const { TabPane }       = Tabs;
 const { ipcRenderer }   = require('electron');
@@ -39,6 +40,7 @@ const Menu = observer(() => {
     const [newName, setNewName] = useState('');
     const [logMsg,  setLogMsg]  = useState('');
     const [saveMessage, setSaveMessage] = useState('');
+    const [activeTab, setActiveTab] = useState('profile');
 
     useEffect(() => {
         const handler = (_, msg) => setLogMsg(msg);
@@ -106,7 +108,7 @@ const Menu = observer(() => {
             {saveMessage && <p role="status">{saveMessage}</p>}
 
             {/* ── Tabs ───────────────────────────────────────────────────── */}
-            <Tabs className="menu-tabs" defaultActiveKey="profile" tabBarStyle={{ marginBottom: 0 }}>
+            <Tabs className="menu-tabs" defaultActiveKey="profile" onChange={setActiveTab} tabBarStyle={{ marginBottom: 0 }}>
                 <TabPane tab="Profile" key="profile">
                     <ProfileTab logMsg={logMsg} setLogMsg={setLogMsg} />
                 </TabPane>
@@ -131,22 +133,8 @@ const Menu = observer(() => {
                 </TabPane>
 
                 <TabPane tab="Log" key="log">
-                    <div style={{ paddingTop: 10 }}>
-                        <p style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: 8, lineHeight: 1.5 }}>
-                            Connection logs are saved per profile and opened in your default text editor.
-                        </p>
-                        <button
-                            className="form-button"
-                            onClick={() => { setLogMsg(''); ipcRenderer.send('log-open', profile.id); }}
-                        >
-                            Open Connection Log
-                        </button>
-                        {logMsg && (
-                            <p style={{ margin: '5px 0 0', fontSize: 11, color: '#e6a817', textAlign: 'center' }}>
-                                {logMsg}
-                            </p>
-                        )}
-                    </div>
+                    <ConnectionLog profileId={profile.id} active={activeTab === 'log'} />
+                    {logMsg && <p role="alert" style={{ color: 'var(--text)' }}>{logMsg}</p>}
                 </TabPane>
 
                 <TabPane tab="Live Help" key="livehelp">

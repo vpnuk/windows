@@ -124,6 +124,40 @@ send:
     Pop $0
 !macroend
 
+; Runs for interactive uninstall AND silent upgrades, before EB removes files
+; or --delete-app-data. Page callbacks are not lifecycle hooks.
+!macro customRemoveFiles
+    SetShellVarContext current
+    ; Preserve only the identity even if Electron cannot launch. This directory
+    ; intentionally survives "Clear application user data".
+    IfFileExists "$APPDATA\VPNUK\device.json" 0 vpnuk_identity_saved
+    CreateDirectory "$LOCALAPPDATA\VPNUK-WireGuard-Recovery"
+    ClearErrors
+    CopyFiles /SILENT "$APPDATA\VPNUK\device.json" "$LOCALAPPDATA\VPNUK-WireGuard-Recovery\device.json"
+    IfErrors 0 vpnuk_identity_saved
+    MessageBox MB_OK "Cannot preserve the WireGuard cleanup record. No application files were removed. Check disk permissions and try again."
+    Abort
+vpnuk_identity_saved:
+    !insertmacro cleanupVpnukTunnels
+    ; No credentials on the command line. Failure/offline/timeout leaves the
+    ; durable device-label record for authenticated cleanup after reinstall.
+    nsExec::ExecToStack '"$INSTDIR\VPNUK.exe" --cleanup-wireguard'
+    Pop $0
+    Pop $1
+    ${If} $0 != 0
+        DetailPrint "WireGuard server cleanup pending; it will retry before the next connection."
+    ${EndIf}
+    Delete "$APPDATA\VPNUK\vpnuk-*.conf"
+    Delete "$APPDATA\VPNUK\shared.conf"
+    Delete "$APPDATA\VPNUK\dedicated.conf"
+    Delete "$APPDATA\VPNUK\11dedicated.conf"
+    ${If} $userDataFlag == true
+        RMDir /r "$APPDATA\VPNUK"
+    ${EndIf}
+    SetShellVarContext all
+    RMDir /r "$INSTDIR"
+!macroend
+
 !macro uninstallWg
     !insertmacro cleanupVpnukTunnels
 
@@ -595,16 +629,8 @@ FunctionEnd
             ${uninstallOvpn}
         ${EndIf}
 
-        ; ------------- User data -------------
-        !insertmacro cleanupVpnukTunnels
-        ; Keeping profiles must not keep ephemeral WireGuard private keys.
-        Delete "$APPDATA\VPNUK\vpnuk-*.conf"
-        Delete "$APPDATA\VPNUK\shared.conf"
-        Delete "$APPDATA\VPNUK\dedicated.conf"
-        Delete "$APPDATA\VPNUK\11dedicated.conf"
-        ${If} $userDataFlag == true
-            RMDir /r "$APPDATA\VPNUK"
-        ${EndIf}
+        ; Tunnel/key/server cleanup and optional data removal run in
+        ; customRemoveFiles, not this interactive-only page callback.
         
         SetShellVarContext all
 

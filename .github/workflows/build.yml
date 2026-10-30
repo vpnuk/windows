@@ -60,6 +60,21 @@ jobs:
       - name: Check Windows feature logic
         run: yarn test:windows
 
+      - name: Check real WireGuard adapter creation and fresh-config reconnect
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'wireguard-installer.exe'
+          Invoke-WebRequest 'https://download.wireguard.com/windows-client/wireguard-installer.exe' -OutFile $installer
+          $signature = Get-AuthenticodeSignature $installer
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|,\s*)O=WireGuard LLC(,|$)') {
+            throw 'WireGuard installer signature is not valid for WireGuard LLC'
+          }
+          $p = Start-Process $installer -ArgumentList '/quiet' -Wait -PassThru
+          if ($p.ExitCode -notin @(0, 3010)) { throw "WireGuard install failed: $($p.ExitCode)" }
+          node tests/wireguard-native.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Native WireGuard adapter/lifecycle checks failed' }
+
       - name: Build .NET VpnHelper cmdlet
         run: |
           dotnet restore VpnHelper\VpnHelper.csproj

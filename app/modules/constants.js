@@ -20,7 +20,6 @@ exports.optionsMtu = [
 ];
 
 const path = require('path');
-const { createHash } = require('crypto');
 const settingsFolder = path.resolve(require('process').env.APPDATA + '\\VPNUK');
 exports.settingsFolder = settingsFolder;
 
@@ -50,16 +49,11 @@ exports.settingsPath = {
     ovpnBinExe: path.join(settingsFolder, 'ovpnBin', 'bin', 'openvpn.exe'),
     ikev2Cert: path.join(settingsFolder, 'ikev2.crt'),
     device: path.join(settingsFolder, 'device.json'),
+    wgRecoveryFolder: path.join(require('process').env.LOCALAPPDATA || require('process').env.APPDATA || settingsFolder, 'VPNUK-WireGuard-Recovery'),
     wgConf: (serverType, serverDns, profileId) => {
-        if (profileId) {
-            if (!/^[a-zA-Z0-9_-]{1,48}$/.test(profileId)) throw new Error('Invalid WireGuard profile identity.');
-            // WireGuard uses the config basename as the tunnel name and accepts
-            // at most 32 characters. Full UUIDs plus our prefix exceed that.
-            // Hash the complete ID so profiles stay distinct without changing
-            // their saved identity or depending on the selected server.
-            const identity = createHash('sha256').update(profileId).digest('hex').slice(0, 26);
-            return path.join(settingsFolder, `vpnuk-${identity}.conf`);
-        }
+        if (profileId && !/^[a-zA-Z0-9_-]{1,48}$/.test(profileId)) throw new Error('Invalid WireGuard profile identity.');
+        // A config is ephemeral and only one VPN may be active. Keep the
+        // working 1.3.8 tunnel names; saved profiles remain independent.
         const slug = exports.wgConfSlug(serverType, serverDns);
         return path.join(settingsFolder, `${slug}.conf`);
     },
