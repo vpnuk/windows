@@ -145,7 +145,7 @@ vpnuk_identity_saved:
     Pop $0
     Pop $1
     ${If} $0 != 0
-        DetailPrint "WireGuard server cleanup pending; it will retry before the next connection."
+        DetailPrint "WireGuard server cleanup pending; the device identity is retained for recovery after reinstall."
     ${EndIf}
     Delete "$APPDATA\VPNUK\vpnuk-*.conf"
     Delete "$APPDATA\VPNUK\shared.conf"

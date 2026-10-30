@@ -38,10 +38,9 @@ const WireGuardDetails = observer(() => {
                 <div className="app-notification-body">
                     <h4>WireGuard — Auto-Connect</h4>
                     <p>
-                        Your config is generated automatically when you click{' '}
-                        <strong>Connect</strong>. Each connection releases the previous
-                        device config and requests a new one. Disconnect removes the
-                        local config and releases the server-side config when reachable.
+                        Your config is loaded automatically when you click{' '}
+                        <strong>Connect</strong>. This device’s server config is reused
+                        for reconnecting. Disconnect removes the local config file.
                     </p>
 
                     {confExists && !serverMismatch && (
@@ -59,7 +58,7 @@ const WireGuardDetails = observer(() => {
 
                     {!confExists && (
                         <p style={{ fontSize: 11, opacity: 0.6, margin: '4px 0 0' }}>
-                            No config saved yet — will be generated on Connect.
+                            No local config saved — will be loaded on Connect.
                         </p>
                     )}
                 </div>

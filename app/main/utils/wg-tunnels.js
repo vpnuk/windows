@@ -28,7 +28,7 @@ function serviceState(tunnel) {
     return Number(match[1]);
 }
 
-function stopAndRemoveTunnel(tunnel, wgExe) {
+function stopTunnel(tunnel) {
     let state = serviceState(tunnel);
     if (state !== null && state !== 1) {
         run('sc.exe', ['stop', serviceName(tunnel)]);
@@ -41,6 +41,11 @@ function stopAndRemoveTunnel(tunnel, wgExe) {
             throw new Error('WireGuard did not stop. Its service and config were retained; try Disconnect again.');
         }
     }
+    return state;
+}
+
+function stopAndRemoveTunnel(tunnel, wgExe) {
+    const state = stopTunnel(tunnel);
     if (state === null) return;
     if (wgExe && fs.existsSync(wgExe)) {
         const result = run(wgExe, ['/uninstalltunnelservice', tunnel], 15000);
@@ -56,6 +61,41 @@ function stopAndRemoveTunnel(tunnel, wgExe) {
         }
     }
     if (serviceState(tunnel) !== null) throw new Error('WireGuard tunnel is still pending removal. Retry Disconnect.');
+}
+
+async function stopSessionTunnel(tunnel, wgExe) {
+    if (!wgExe || !fs.existsSync(wgExe)) {
+        // Only the external-uninstall recovery path needs raw Service Control
+        // deletion. Normal sessions use WireGuard's own uninstaller as in 1.3.8.
+        stopAndRemoveTunnel(tunnel, null);
+        return;
+    }
+    stopTunnel(tunnel);
+    // 1.3.8 waited for the native uninstaller's close event before installing
+    // the next tunnel. Keep that ordering instead of the replacement sync path.
+    await new Promise((resolve, reject) => {
+        let timer;
+        let settled = false;
+        const finish = error => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (error) reject(error); else resolve();
+        };
+        const proc = cp.spawn(wgExe, ['/uninstalltunnelservice', tunnel],
+            { shell: false, windowsHide: true });
+        timer = setTimeout(() => finish(new Error('WireGuard tunnel removal timed out. No replacement tunnel was started.')), 15000);
+        proc.once('error', error => finish(error));
+        proc.once('close', code => {
+            try {
+                // WireGuard returns an error when no service existed. That is
+                // harmless only when Service Control confirms it is absent.
+                if (serviceState(tunnel) !== null) {
+                    finish(new Error(`WireGuard tunnel removal is incomplete (${code}).`));
+                } else finish();
+            } catch (error) { finish(error); }
+        });
+    });
 }
 
 function findOwnedTunnels() {
@@ -85,4 +125,4 @@ function cleanupOwnedTunnels(wgExe) {
     }
 }
 
-module.exports = { serviceState, stopAndRemoveTunnel, cleanupOwnedTunnels, findOwnedTunnels };
+module.exports = { serviceState, stopAndRemoveTunnel, stopSessionTunnel, cleanupOwnedTunnels, findOwnedTunnels };

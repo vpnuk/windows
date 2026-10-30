@@ -4,8 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const { connectionStates } = require('../../modules/constants');
 const VpnBase = require('./VpnBase');
-const { createConfig, releaseConfig, removeLocalConfig, confPath } = require('../../modules/wg-config');
-const { serviceState, stopAndRemoveTunnel, cleanupOwnedTunnels } = require('../utils/wg-tunnels');
+const { createConfig, removeLocalConfig, confPath } = require('../../modules/wg-config');
+const { serviceState, stopSessionTunnel, cleanupOwnedTunnels } = require('../utils/wg-tunnels');
 const { cleanupBypassRoutes } = require('../utils/bypass-routes');
 const { createDiagnostics, startupFailure } = require('../utils/wg-diagnostics');
 const { appendToLog } = require('../utils/logs');
@@ -63,33 +63,17 @@ class WireGuard extends VpnBase {
         this.#stopWatcher();
         await this.refreshDiagnostics(this.#profile.id);
         // No early return if the external WireGuard application was uninstalled.
-        stopAndRemoveTunnel(this.#tunnelName, this.#exeOrNull());
+        await stopSessionTunnel(this.#tunnelName, this.#exeOrNull());
         await this.refreshDiagnostics(this.#profile.id);
         removeLocalConfig(this.#profile);
         cleanupBypassRoutes();
         this.#status = connectionStates.disconnected;
-        // Restore the intentional-disconnect kill-switch route before API deletion.
         this._disconnectedHook?.(intentional);
-        // Remote cleanup runs after connectivity is restored on an intentional
-        // disconnect. It cannot complete through an active drop kill switch.
-        if (!intentional && this.#profile.killSwitchEnabled) {
-            this.#log('Remote peer cleanup deferred while the kill switch blocks internet access.\n');
-            this.#closeLog();
-            return;
-        }
-        try {
-            // A request can create the peer and then fail before we learn its
-            // endpoint. Release this exact device across its servers, not just
-            // the currently selected server.
-            await releaseConfig(this.#profile, '');
-        } catch (error) {
-            // Local keys/service are already gone. Offline remote deletion must not
-            // pretend it succeeded; the next connect releases this device slot again.
-            this.#log(`WireGuard remote config cleanup failed: ${error.message}\n`);
-            this._errorHook?.(new Error('Local WireGuard config removed. Server-side cleanup could not finish; it will be retried before the next connection.'));
-        } finally {
-            this.#closeLog();
-        }
+        // Restore 1.3.8's reusable server peer. Local keys are removed, but
+        // get_config can return the same registered keys on the next connect.
+        // Uninstall has its own confirmed remote cleanup and recovery journal.
+        this.#log('Local WireGuard config removed; server config retained for reconnect.\n');
+        this.#closeLog();
     }
 
     connect() {
@@ -105,8 +89,8 @@ class WireGuard extends VpnBase {
                 this._connectingHook?.();
                 // Startup recovery handles owned orphaned services once.
                 // Normal reconnect must not sweep every profile/config again.
-                stopAndRemoveTunnel(this.#tunnelName, exe);
-                this.#log('Requesting a new WireGuard config for this connection.\n');
+                await stopSessionTunnel(this.#tunnelName, exe);
+                this.#log('Loading this device’s WireGuard config without replacing its registered keys.\n');
                 const config = await createConfig(this.#profile);
                 this.#server = config.server;
                 // Import existing history for this profile but don't classify a
