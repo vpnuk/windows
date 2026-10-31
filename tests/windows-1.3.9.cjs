@@ -560,7 +560,9 @@ test('WireGuard software removal is unchecked by default, upgrade-guarded, and r
 test('uninstall helper reports failures and restart requirements without erasing native exit codes', () => {
     const nsis = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
     const helper = nsis.match(/!macro runWireGuardCleanup[\s\S]*?!macroend/)[0];
-    assert(helper.includes('Pop $R7\n    Pop $R8'));
+    const resultPops = /Pop \$R7\r?\n[ \t]+Pop \$R8/;
+    assert(resultPops.test(helper.replace(/\r?\n/g, '\n')));
+    assert(resultPops.test(helper.replace(/\r?\n/g, '\r\n')));
     assert(helper.includes('${If} $R7 == 3010'));
     assert(helper.includes('SetRebootFlag true'));
     assert(helper.includes('${ElseIf} $R7 != 0'));
