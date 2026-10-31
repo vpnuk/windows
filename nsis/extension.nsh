@@ -111,7 +111,9 @@ send:
 !define uninstallOvpn "!insertmacro uninstallOvpn"
 
 !define VPNUK_NSIS_DIRECTORY "${__FILEDIR__}"
-Var wgRemovalFlag
+!ifdef BUILD_UNINSTALLER
+    Var wgRemovalFlag
+!endif
 
 !macro customUnInit
     ; Silent removal and upgrades never implicitly opt into shared-software removal.

@@ -538,6 +538,8 @@ test('silent and interactive uninstall run cleanup before removing application f
 test('WireGuard software removal is unchecked by default, upgrade-guarded, and runs before app data removal', () => {
     const nsis = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
     const init = nsis.match(/!macro customUnInit[\s\S]*?!macroend/)[0];
+    assert(/!ifdef BUILD_UNINSTALLER\s+Var wgRemovalFlag\s+!endif/.test(nsis),
+        'uninstall-only state must not create an unused global in the installer compilation pass');
     const hook = nsis.match(/!macro customRemoveFiles[\s\S]*?!macroend/)[0];
     const page = nsis.match(/Function un\.OvpnPageCreate[\s\S]*?FunctionEnd/)[0];
     const leave = nsis.match(/Function un\.OvpnPageLeave[\s\S]*?FunctionEnd/)[0];

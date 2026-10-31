@@ -7,6 +7,7 @@ RequestExecutionLevel admin
 !include "WordFunc.nsh"
 !include "nsDialogs.nsh"
 !define isUpdated '"" == "--updated"'
+!define BUILD_UNINSTALLER
 !include "..\nsis\extension.nsh"
 Name "VPNUK uninstall compile check"
 !ifndef OUTPUT_FILE
@@ -15,7 +16,7 @@ Name "VPNUK uninstall compile check"
 OutFile "${OUTPUT_FILE}"
 InstallDir "$TEMP\VPNUK-Uninstall-Compile-Check"
 !insertmacro customUninstallPage
-UninstPage instfiles
+!insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 Function un.onInit
     !insertmacro customUnInit
