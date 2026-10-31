@@ -60,6 +60,12 @@ jobs:
       - name: Check Windows feature logic
         run: yarn test:windows
 
+      - name: Check WireGuard uninstall failure and ownership cases
+        shell: powershell
+        run: |
+          & .\tests\wireguard-uninstall.cases.ps1
+          if ($LASTEXITCODE -ne 0) { throw "WireGuard uninstall regression checks failed" }
+
       - name: Check real WireGuard adapter creation and fresh-config reconnect
         timeout-minutes: 8
         shell: pwsh
@@ -162,6 +168,23 @@ jobs:
               Write-Host "Shortcut: $lnk  Target=$($sc.TargetPath)  Args=$($sc.Arguments)"
             }
           }
+
+      - name: Verify packaged optional WireGuard uninstall and default preservation
+        timeout-minutes: 12
+        shell: powershell
+        run: |
+          $installer = Get-ChildItem .\release\*.exe | Where-Object { $_.Name -like "*Setup*" -and $_.Name -notlike "*Web*" } | Select-Object -First 1
+          & .\tests\wireguard-uninstall-native.ps1 -PackagedInstaller $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw "Packaged WireGuard removal verification failed" }
+
+      - name: Preserve WireGuard removal diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wireguard-removal-check-${{ github.run_number }}
+          path: ${{ runner.temp }}/vpnuk-wg-removal-*/*.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Sign installer wrappers with eSigner
         shell: pwsh

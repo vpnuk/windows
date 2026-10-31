@@ -110,18 +110,53 @@ send:
 !macroend
 !define uninstallOvpn "!insertmacro uninstallOvpn"
 
-!macro cleanupVpnukTunnels
-    ; Stop only services whose actual config belongs to VPNUK, even if the
-    ; WireGuard application has already been uninstalled. Wait for STOPPED;
-    ; never delete a live driver service after an arbitrary sleep.
-    nsExec::ExecToStack `powershell -NoProfile -NonInteractive -Command "$$ErrorActionPreference = 'Stop'; $$owned = Get-CimInstance Win32_Service | Where-Object { $$_.Name.StartsWith(('WireGuardTunnel' + [char]36)) -and $$_.PathName.ToLowerInvariant().Contains(([char]92 + 'vpnuk' + [char]92)) }; foreach ($$item in $$owned) { $$service = Get-Service -Name $$item.Name; if ($$service.Status -ne 'Stopped') { $$service.Stop(); $$service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20)) }; sc.exe delete $$item.Name | Out-Null; if ($$LASTEXITCODE -ne 0) { throw 'Cannot delete stopped VPNUK tunnel' } }"`
-    Pop $0
-    ${If} $0 != 0
-        Pop $0
-        MessageBox MB_OK "A VPNUK tunnel could not be stopped safely. Close VPNUK, disconnect the VPN and try again."
+!define VPNUK_NSIS_DIRECTORY "${__FILEDIR__}"
+Var wgRemovalFlag
+
+!macro customUnInit
+    ; Silent removal and upgrades never implicitly opt into shared-software removal.
+    StrCpy $wgRemovalFlag "0"
+    ; Explicit administrative opt-in also lets CI exercise the packaged hook.
+    ; An automatic update can never enable it, even if the flag is supplied.
+    ${IfNot} ${isUpdated}
+        ${If} ${Silent}
+            ${GetParameters} $R0
+            ClearErrors
+            ${GetOptions} $R0 "/REMOVEWIREGUARD" $R1
+            ${IfNot} ${Errors}
+                ${If} $R1 == ""
+                    StrCpy $wgRemovalFlag "1"
+                ${EndIf}
+            ${EndIf}
+        ${EndIf}
+    ${EndIf}
+!macroend
+
+!macro runWireGuardCleanup MODE
+    InitPluginsDir
+    File /oname=$PLUGINSDIR\wireguard-uninstall.ps1 "${VPNUK_NSIS_DIRECTORY}\wireguard-uninstall.ps1"
+    File /oname=$PLUGINSDIR\WireGuardDevices.cs "${VPNUK_NSIS_DIRECTORY}\WireGuardDevices.cs"
+    ; Use native Windows PowerShell on 64-bit Windows, including emulated NSIS.
+    StrCpy $R6 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+    IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 +2
+    StrCpy $R6 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+    nsExec::ExecToStack /TIMEOUT=240000 '"$R6" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\wireguard-uninstall.ps1" -Mode "${MODE}" -ConfigDirectory "$APPDATA\VPNUK" -LogDirectory "$LOCALAPPDATA\VPNUK-WireGuard-Recovery"'
+    Pop $R7
+    Pop $R8
+    ${If} $R7 == 3010
+        SetRebootFlag true
+        MessageBox MB_OK|MB_ICONEXCLAMATION "WireGuard removal requires a Windows restart. Removal is not confirmed complete until you restart.$\r$\nLog: $LOCALAPPDATA\VPNUK-WireGuard-Recovery\wireguard-uninstall.log"
+    ${ElseIf} $R7 != 0
+        SetErrorLevel 1
+        MessageBox MB_OK|MB_ICONSTOP "WireGuard cleanup could not be completed or verified. VPNUK removal has stopped. No successful WireGuard removal is being reported.$\r$\nClose WireGuard and retry, or check:$\r$\n$LOCALAPPDATA\VPNUK-WireGuard-Recovery\wireguard-uninstall.log$\r$\nResult: $R7"
         Abort
     ${EndIf}
-    Pop $0
+!macroend
+
+!macro cleanupVpnukTunnels
+    ; Native ServiceController/registry discovery, without WMI/CIM. Only the
+    ; exact VPNUK config directory proves ownership in this mode.
+    !insertmacro runWireGuardCleanup "OwnedTunnels"
 !macroend
 
 ; Runs for interactive uninstall AND silent upgrades, before EB removes files
@@ -147,6 +182,13 @@ vpnuk_identity_saved:
     ${If} $0 != 0
         DetailPrint "WireGuard server cleanup pending; the device identity is retained for recovery after reinstall."
     ${EndIf}
+    ; The checkbox is available only for explicit interactive removal.
+    ; Never uninstall shared WireGuard as a side effect of an app update.
+    ${IfNot} ${isUpdated}
+        ${If} $wgRemovalFlag == "1"
+            !insertmacro runWireGuardCleanup "RemoveWireGuard"
+        ${EndIf}
+    ${EndIf}
     Delete "$APPDATA\VPNUK\vpnuk-*.conf"
     Delete "$APPDATA\VPNUK\shared.conf"
     Delete "$APPDATA\VPNUK\dedicated.conf"
@@ -157,32 +199,6 @@ vpnuk_identity_saved:
     SetShellVarContext all
     RMDir /r "$INSTDIR"
 !macroend
-
-!macro uninstallWg
-    !insertmacro cleanupVpnukTunnels
-
-    ; Step 2 — Locate wireguard.exe from known install paths and call /uninstall.
-    StrCpy $1 ""
-    IfFileExists "$PROGRAMFILES64\WireGuard\wireguard.exe" 0 +2
-    StrCpy $1 "$PROGRAMFILES64\WireGuard\wireguard.exe"
-    ${If} $1 == ""
-        IfFileExists "$PROGRAMFILES\WireGuard\wireguard.exe" 0 +2
-        StrCpy $1 "$PROGRAMFILES\WireGuard\wireguard.exe"
-    ${EndIf}
-    ${If} $1 == ""
-        ReadRegStr $1 HKLM "SOFTWARE\WireGuard" "InstallationDirectory"
-        ${If} $1 != ""
-            StrCpy $1 "$1\wireguard.exe"
-        ${EndIf}
-    ${EndIf}
-    ${If} $1 != ""
-        nsExec::ExecToStack '"$1" /uninstall'
-        Pop $0
-        Pop $0
-        Sleep 5000
-    ${EndIf}
-!macroend
-!define uninstallWg "!insertmacro uninstallWg"
 
 !macro radioBtnClick
     Pop $hwnd
@@ -467,26 +483,26 @@ vpnuk_identity_saved:
             GetDlgItem $0 $hWndParent 1
             EnableWindow $0 0
 
-            ${If} $wgPath != ""
-                ${uninstallWg}
-            ${EndIf}
+            ; WireGuard's MSI handles upgrades. Do not pre-uninstall shared
+            ; WireGuard or delete standalone tunnels during an app upgrade.
 
             ${ClearStack}
             inetc::get /NOCANCEL "$wgInstallerUrl" "$TEMP\wgInstaller.exe" /END
             Pop $1
 
             ${If} $1 == "OK"
-                nsExec::ExecToStack '"$TEMP\wgInstaller.exe" /S'
+                nsExec::ExecToStack /TIMEOUT=240000 '"$TEMP\wgInstaller.exe" /quiet'
                 Pop $0
-                ${If} $0 != 0
-                    Pop $0
-                    MessageBox MB_OK "Error installing WireGuard:$\n$0"
+                Pop $1
+                ${If} $0 == 3010
+                    SetRebootFlag true
+                    MessageBox MB_OK|MB_ICONEXCLAMATION "WireGuard installation requires a Windows restart."
+                ${ElseIf} $0 != 0
+                    MessageBox MB_OK "Error installing WireGuard (result $0):$\n$1"
                     Abort
                 ${EndIf}
-                ; Close WireGuard UI if it auto-launched after silent install
-                nsExec::ExecToStack 'taskkill /F /IM wireguard.exe'
-                Pop $0
-                Pop $0
+                ; Do not force-kill wireguard.exe: its tunnel services use the
+                ; same executable and must be stopped through Service Control.
             ${Else}
                 MessageBox MB_OK "Error downloading WireGuard:$\n$1"
                 Abort
@@ -542,13 +558,18 @@ FunctionEnd
     Var hwnd
     Var ovpnFlag
     Var userDataFlag
+    Var wgRemovalCheckbox
 
     Function un.OvpnPageCreate
+        ${If} ${isUpdated}
+            Abort
+        ${EndIf}
         ReadRegStr $0 HKLM SOFTWARE\OpenVPN exe_path
 
         ; Pre-initialise flags so validation in Leave never sees empty string
         StrCpy $ovpnFlag "false"
         StrCpy $userDataFlag "false"
+        StrCpy $wgRemovalFlag "0"
 
         !insertmacro MUI_HEADER_TEXT $(title) $(subtitle)
         nsDialogs::Create 1018
@@ -577,17 +598,24 @@ FunctionEnd
             StrCpy $ovpnFlag "false"
         ${EndIf}
 
-    ; ------------- User data -------------
-        ${NSD_CreateLabel} 0u 36u 100% 12u "Clear application user data"
+    ; ------------- Optional shared WireGuard removal -------------
+        ${NSD_CreateCheckbox} 0u 36u 100% 12u "Uninstall WireGuard and its adapters"
+        Pop $wgRemovalCheckbox
+        ${NSD_Uncheck} $wgRemovalCheckbox
+        ${NSD_CreateLabel} 12u 50u 95% 30u "Removes WireGuard for all apps and deletes its saved tunnels. Export any configurations you want to keep first."
         Pop $hwnd
 
-        ${NSD_CreateRadioButton} 12u 48u 100% 12u "Yes"
+    ; ------------- User data -------------
+        ${NSD_CreateLabel} 0u 84u 100% 12u "Clear application user data"
+        Pop $hwnd
+
+        ${NSD_CreateRadioButton} 12u 98u 100% 12u "Yes"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "true"
         ${NSD_OnClick} $hwnd un.dataRadioClick
         ${NSD_AddStyle} $hwnd ${WS_GROUP}
 
-        ${NSD_CreateRadioButton} 12u 60u 100% 12u "No"
+        ${NSD_CreateRadioButton} 12u 110u 100% 12u "No"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "false"
         ${NSD_OnClick} $hwnd un.dataRadioClick
@@ -610,6 +638,7 @@ FunctionEnd
     FunctionEnd
 
     Function un.OvpnPageLeave
+        ${NSD_GetState} $wgRemovalCheckbox $wgRemovalFlag
         ${If} $ovpnFlag == ""
         ${OrIf} $userDataFlag == ""
             MessageBox MB_OK "Please specify your choice"

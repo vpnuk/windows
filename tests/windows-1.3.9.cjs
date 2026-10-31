@@ -535,6 +535,41 @@ test('silent and interactive uninstall run cleanup before removing application f
     assert(!page.includes('RMDir /r "$APPDATA\\VPNUK"'));
     assert(!hook.includes('password') && !hook.includes('credentials.login'));
 });
+test('WireGuard software removal is unchecked by default, upgrade-guarded, and runs before app data removal', () => {
+    const nsis = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
+    const init = nsis.match(/!macro customUnInit[\s\S]*?!macroend/)[0];
+    const hook = nsis.match(/!macro customRemoveFiles[\s\S]*?!macroend/)[0];
+    const page = nsis.match(/Function un\.OvpnPageCreate[\s\S]*?FunctionEnd/)[0];
+    const leave = nsis.match(/Function un\.OvpnPageLeave[\s\S]*?FunctionEnd/)[0];
+    assert(init.includes('StrCpy $wgRemovalFlag "0"'));
+    assert(init.includes('${IfNot} ${isUpdated}'));
+    assert(init.includes('${If} ${Silent}'));
+    assert(init.includes('${GetOptions} $R0 "/REMOVEWIREGUARD" $R1'));
+    assert(page.includes('${NSD_Uncheck} $wgRemovalCheckbox'));
+    assert(page.includes('Removes WireGuard for all apps and deletes its saved tunnels.'));
+    assert(leave.includes('${NSD_GetState} $wgRemovalCheckbox $wgRemovalFlag'));
+    assert(hook.includes('${IfNot} ${isUpdated}'));
+    assert(hook.includes('${If} $wgRemovalFlag == "1"'));
+    assert(hook.indexOf('runWireGuardCleanup "RemoveWireGuard"') < hook.indexOf('Delete "$APPDATA'));
+    assert(!nsis.includes('"$1" /uninstall'));
+    const installPage = nsis.match(/Function wgPageLeave[\s\S]*?FunctionEnd/)[0];
+    assert(!installPage.includes('uninstallWg'), 'dependency updates must use MSI upgrade, not pre-uninstall');
+    assert(installPage.includes('wgInstaller.exe" /quiet'));
+    assert(!installPage.includes('taskkill /F /IM wireguard.exe'), 'never kill every native tunnel to close the tray UI');
+});
+test('uninstall helper reports failures and restart requirements without erasing native exit codes', () => {
+    const nsis = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
+    const helper = nsis.match(/!macro runWireGuardCleanup[\s\S]*?!macroend/)[0];
+    assert(helper.includes('Pop $R7\n    Pop $R8'));
+    assert(helper.includes('${If} $R7 == 3010'));
+    assert(helper.includes('SetRebootFlag true'));
+    assert(helper.includes('${ElseIf} $R7 != 0'));
+    assert(helper.includes('SetErrorLevel 1'));
+    assert(helper.includes('Abort'));
+    assert(!helper.includes('Get-CimInstance'));
+    const workflow = fs.readFileSync(path.join(root, '.github/workflows/build.yml'), 'utf8');
+    assert(workflow.includes('tests\\wireguard-uninstall-native.ps1'));
+});
 test('reconnect creates fresh keys with stable device identity after confirmed peer deletion', async () => {
     const f = configFixture();
     await f.api.createConfig(f.profile);
