@@ -15,8 +15,9 @@ Name "VPNUK uninstall compile check"
 !endif
 OutFile "${OUTPUT_FILE}"
 InstallDir "$TEMP\VPNUK-Uninstall-Compile-Check"
-!insertmacro customUninstallPage
 !insertmacro MUI_UNPAGE_INSTFILES
+; Match electron-builder's assistedInstaller.nsh: extras follow INSTFILES.
+!insertmacro customUninstallPage
 !insertmacro MUI_LANGUAGE "English"
 Function un.onInit
     !insertmacro customUnInit

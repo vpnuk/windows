@@ -13,9 +13,9 @@ function Invoke-CheckboxUninstall([string]$Uninstaller, [string]$AppExe, [bool]$
         while ((Get-Date) -lt $deadline) {
             $dialogs = @([VpnukUninstallDialog]::Dialogs())
             $appPresent = Test-Path -LiteralPath $AppExe
-            if (-not $appPresent -and -not $selectionConfirmed) {
-                throw 'VPNUK disappeared before the actual uninstall checkbox could be verified.'
-            }
+            # Electron-builder intentionally shows extras AFTER the main
+            # VPNUK removal. Require the checkbox before accepting completion,
+            # but do not confuse that supported page order with a failure.
             if (-not $appPresent -and -not $dialogs.Count -and $selectionConfirmed) {
                 Write-Host "PASS actual uninstall checkbox selected=$RemoveWireGuard and wizard completed"
                 return

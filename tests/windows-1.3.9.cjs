@@ -535,7 +535,7 @@ test('silent and interactive uninstall run cleanup before removing application f
     assert(!page.includes('RMDir /r "$APPDATA\\VPNUK"'));
     assert(!hook.includes('password') && !hook.includes('credentials.login'));
 });
-test('WireGuard software removal is unchecked by default, upgrade-guarded, and runs before app data removal', () => {
+test('WireGuard removal is optional, upgrade-guarded, and dispatched from the correct uninstall stage', () => {
     const nsis = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
     const init = nsis.match(/!macro customUnInit[\s\S]*?!macroend/)[0];
     assert(/!ifdef BUILD_UNINSTALLER\s+Var wgRemovalFlag\s+!endif/.test(nsis),
@@ -552,10 +552,15 @@ test('WireGuard software removal is unchecked by default, upgrade-guarded, and r
     assert(!page.includes('Removes WireGuard for all apps'));
     assert(page.includes('${NSD_OnClick} $wgRemovalCheckbox un.wgRemovalClick'));
     assert(!page.includes('StrCpy $wgRemovalFlag "0"'), 'page recreation must not erase the saved selection');
+    assert(leave.indexOf('${NSD_GetState} $wgRemovalCheckbox $wgRemovalFlag') <
+        leave.indexOf('runWireGuardCleanup "RemoveWireGuard"'));
+    assert(leave.includes('runWireGuardCleanup "RemoveWireGuard"'),
+        'electron-builder shows extras after INSTFILES; interactive removal must run on page leave');
     assert(leave.includes('${NSD_GetState} $wgRemovalCheckbox $wgRemovalFlag'));
     assert(hook.includes('${IfNot} ${isUpdated}'));
     assert(hook.includes('${If} $wgRemovalFlag == "1"'));
     assert(hook.includes('WireGuard removal selection=$wgRemovalFlag'));
+    assert(nsis.includes('FileSeek $R4 0 END'), 'append logging must not overwrite previous dispatch evidence');
     assert(hook.indexOf('runWireGuardCleanup "RemoveWireGuard"') < hook.indexOf('--cleanup-wireguard'),
         'selected local removal must not wait behind remote cleanup');
     assert(hook.indexOf('runWireGuardCleanup "RemoveWireGuard"') < hook.indexOf('Delete "$APPDATA'));

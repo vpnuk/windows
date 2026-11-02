@@ -152,7 +152,7 @@ send:
         MessageBox MB_OK|MB_ICONEXCLAMATION "WireGuard removal requires a Windows restart. Removal is not confirmed complete until you restart.$\r$\nLog: $LOCALAPPDATA\VPNUK-WireGuard-Recovery\wireguard-uninstall.log"
     ${ElseIf} $R7 != 0
         SetErrorLevel 1
-        MessageBox MB_OK|MB_ICONSTOP "WireGuard cleanup could not be completed or verified. VPNUK removal has stopped. No successful WireGuard removal is being reported.$\r$\nClose WireGuard and retry, or check:$\r$\n$LOCALAPPDATA\VPNUK-WireGuard-Recovery\wireguard-uninstall.log$\r$\nResult: $R7"
+        MessageBox MB_OK|MB_ICONSTOP "WireGuard cleanup could not be completed or verified. WireGuard removal is not complete.$\r$\nClose WireGuard and retry, or check:$\r$\n$LOCALAPPDATA\VPNUK-WireGuard-Recovery\wireguard-uninstall.log$\r$\nResult: $R7"
         Abort
     ${EndIf}
 !macroend
@@ -171,6 +171,7 @@ send:
     ClearErrors
     FileOpen $R4 "$LOCALAPPDATA\VPNUK-WireGuard-Recovery\wireguard-uninstall.log" a
     ${IfNot} ${Errors}
+        FileSeek $R4 0 END
         FileWrite $R4 "VPNUK uninstaller: ${MESSAGE}$\r$\n"
         FileClose $R4
     ${EndIf}
@@ -192,8 +193,9 @@ send:
     Abort
 vpnuk_identity_saved:
     !insertmacro logWireGuardUninstall "WireGuard removal selection=$wgRemovalFlag"
-    ; Dispatch the chosen LOCAL cleanup immediately. Do not put network/account
-    ; cleanup between the user's selection and shared-software removal.
+    ; At this stage only the explicit SILENT command-line opt-in is available.
+    ; Electron-builder places customUninstallPage AFTER UNPAGE_INSTFILES.
+    ; Interactive choices run in un.OvpnPageLeave, just like OpenVPN.
     ${IfNot} ${isUpdated}
         ${If} $wgRemovalFlag == "1"
             !insertmacro logWireGuardUninstall "Starting selected full WireGuard removal"
@@ -681,6 +683,18 @@ FunctionEnd
 
         SetShellVarContext current
 
+        ; The extras page follows VPNUK's main removal step in electron-builder.
+        ; Run the interactive choice HERE, when the checkbox has been read.
+        ; Helpers are embedded in the still-running temporary uninstaller;
+        ; they do not depend on files left in $INSTDIR.
+        !insertmacro logWireGuardUninstall "Interactive WireGuard removal selection=$wgRemovalFlag"
+        ${IfNot} ${isUpdated}
+            ${If} $wgRemovalFlag == "1"
+                !insertmacro logWireGuardUninstall "Starting selected interactive full WireGuard removal"
+                !insertmacro runWireGuardCleanup "RemoveWireGuard"
+            ${EndIf}
+        ${EndIf}
+
         ; ----------- Updater cache -----------
         RMDir /r "$LOCALAPPDATA\vpnuk-updater"
 
@@ -689,8 +703,8 @@ FunctionEnd
             ${uninstallOvpn}
         ${EndIf}
 
-        ; Tunnel/key/server cleanup and optional data removal run in
-        ; customRemoveFiles, not this interactive-only page callback.
+        ; Owned-tunnel/key/server cleanup runs in customRemoveFiles.
+        ; Interactive shared-software choices belong on this extras page.
         
         SetShellVarContext all
 
