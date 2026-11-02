@@ -42,6 +42,12 @@ jobs:
       - name: Check unsigned build signing isolation
         run: node tests/unsigned-build.cjs
 
+      - name: Check cold Windows PowerShell service discovery
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\tests\wireguard-service-discovery.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Cold service discovery failed' }
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

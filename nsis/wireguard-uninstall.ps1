@@ -39,7 +39,19 @@ function Invoke-Native([string]$File, [string[]]$Arguments, [int]$Timeout = 6000
     } finally { $process.Dispose() }
 }
 
+function Initialize-ServiceController {
+    # Fresh Windows PowerShell 5 -NoProfile sessions do not necessarily load
+    # this assembly. Do not depend on Get-Service or an interactive profile.
+    if (-not ('System.ServiceProcess.ServiceController' -as [type])) {
+        Add-Type -AssemblyName System.ServiceProcess
+    }
+    if (-not ('System.ServiceProcess.ServiceController' -as [type])) {
+        throw 'Windows ServiceController could not be loaded; no service cleanup was attempted.'
+    }
+}
+
 function Get-WgServices {
+    Initialize-ServiceController
     return @([System.ServiceProcess.ServiceController]::GetServices() |
         Where-Object { $_.ServiceName -eq 'WireGuardManager' -or $_.ServiceName -match '^WireGuardTunnel\$[a-zA-Z0-9_=+.-]{1,64}$' })
 }
