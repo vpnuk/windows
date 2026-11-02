@@ -23,7 +23,9 @@ function Invoke-CheckboxUninstall([string]$Uninstaller, [string]$AppExe, [bool]$
             foreach ($dialog in $dialogs) {
                 $controls = @([VpnukUninstallDialog]::Children($dialog.Handle))
                 $checkbox = @($controls | Where-Object { $_.ClassName -eq 'Button' -and $_.Text -eq 'Uninstall WireGuard' })
-                if ($checkbox.Count -eq 1) {
+                # Once verified, do not send synchronous checkbox messages
+                # while page leave is busy running native cleanup.
+                if ($checkbox.Count -eq 1 -and -not $selectionConfirmed) {
                     if (-not $selectionSeen) {
                         if ([VpnukUninstallDialog]::Checked($checkbox[0].Handle) -ne 0) {
                             throw 'WireGuard removal must be unchecked by default.'

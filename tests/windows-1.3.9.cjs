@@ -578,6 +578,8 @@ test('packaged removal tests click the real checkbox instead of bypassing it wit
     assert(!native.includes("$arguments += '/REMOVEWIREGUARD'"));
     assert(ui.includes('WireGuard removal must be unchecked by default.'));
     assert(ui.includes('[VpnukUninstallDialog]::Click($checkbox[0].Handle)'));
+    assert(ui.includes('if ($checkbox.Count -eq 1 -and -not $selectionConfirmed)'),
+        'a confirmed checkbox must not be polled while the page-leave callback is busy');
     assert(ui.includes('Actual checkbox state did not match'));
     assert(native.includes("Beginning cleanup mode RemoveWireGuard"));
 });
