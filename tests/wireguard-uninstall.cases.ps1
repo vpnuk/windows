@@ -13,6 +13,21 @@ function Case([string]$Name, [scriptblock]$Body) {
     try { & $Body; Write-Host "PASS $Name" }
     catch { $script:failures++; Write-Host "FAIL $Name`: $_" }
 }
+Case 'NSIS silent switches remain bare while whitespace-containing paths are quoted' {
+    Assert ((ConvertTo-NativeArgument '/S') -ceq '/S') 'Silent switch was quoted'
+    Assert ((ConvertTo-NativeArgument '/REMOVEWIREGUARD') -ceq '/REMOVEWIREGUARD') 'Removal switch was quoted'
+    Assert ((ConvertTo-NativeArgument '/x') -ceq '/x') 'MSI switch changed'
+    Assert ((ConvertTo-NativeArgument 'C:\Program Files\VPNUK\file.exe') -ceq '"C:\Program Files\VPNUK\file.exe"') 'Spaced path was not quoted'
+    Assert ((ConvertTo-NativeArgument 'C:\Some Folder\') -ceq '"C:\Some Folder\\"') 'Trailing backslash was not protected'
+    Assert ((ConvertTo-NativeArgument '') -ceq '""') 'Empty argument was dropped'
+}
+Case 'native arguments reject embedded quotes and newlines' {
+    foreach ($value in @('bad"argument', "bad`nargument", "bad`rargument")) {
+        $rejected = $false
+        try { ConvertTo-NativeArgument $value | Out-Null } catch { $rejected = $true }
+        Assert $rejected 'Unsafe native argument was accepted'
+    }
+}
 function Reset-Fakes {
     $script:products = @()
     $script:devices = @()

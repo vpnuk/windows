@@ -130,6 +130,8 @@ send:
                     StrCpy $wgRemovalFlag "1"
                 ${EndIf}
             ${EndIf}
+            ; An absent optional switch is normal, not an uninstall error.
+            ClearErrors
         ${EndIf}
     ${EndIf}
 !macroend

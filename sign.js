@@ -18,6 +18,10 @@ const { execFileSync } = require('child_process');
  * If CST_BAT / CST_DIR are absent (local dev), signing is skipped silently.
  */
 module.exports = async function sign(configuration) {
+  if (process.env.VPNUK_UNSIGNED === 'true') {
+    console.log('[sign.js] Explicit unsigned test mode — no signing service used');
+    return;
+  }
   const cstBat = process.env.CST_BAT;
   const cstDir = process.env.CST_DIR;
 

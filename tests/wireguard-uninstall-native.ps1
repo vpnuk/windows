@@ -10,12 +10,15 @@ $exe = 'C:\Program Files\WireGuard\wireguard.exe'
 $name = 'vpnuk-uninstall-check'
 $config = Join-Path $temporary ($name + '.conf')
 $appExe = 'C:\Program Files\VPNUK\VPNUK.exe'
-if (-not (Test-Path -LiteralPath $appExe)) { throw 'Signed VPNUK must be installed before the packaged uninstall test.' }
+if (-not (Test-Path -LiteralPath $appExe)) { throw 'VPNUK must be installed before the packaged uninstall test.' }
 function Invoke-PackagedUninstall([bool]$RemoveWireGuard) {
     $uninstallers = @(Get-ChildItem -LiteralPath ([IO.Path]::GetDirectoryName($appExe)) -Filter '*uninstall*.exe')
     if ($uninstallers.Count -ne 1) { throw 'Expected one packaged VPNUK uninstaller.' }
     $arguments = @('/S')
     if ($RemoveWireGuard) { $arguments += '/REMOVEWIREGUARD' }
+    $message = "Starting packaged uninstall; explicit shared WireGuard removal = $RemoveWireGuard"
+    Write-Host $message
+    Add-Content -LiteralPath (Join-Path $temporary 'packaged-test.log') -Value $message
     $code = Invoke-Native $uninstallers[0].FullName $arguments 240000
     if ($code -ne 0) { throw "Packaged VPNUK uninstaller failed: $code" }
     # NSIS can relaunch its uninstaller from TEMP and return before it completes.
@@ -78,6 +81,13 @@ Endpoint = 127.0.0.1:9
         throw 'Packaged cleanup did not report verified completion.'
     }
     Write-Host 'PASS packaged optional WireGuard MSI uninstall, active-tunnel stop and adapter/software absence verification'
+} catch {
+    $_ | Out-String | Add-Content -LiteralPath (Join-Path $temporary 'packaged-test.log')
+    # Record window titles, not command lines, environment variables or keys.
+    Get-Process | Where-Object { $_.ProcessName -match 'VPNUK|uninstall|Au_|wireguard|powershell|msiexec' } |
+        Select-Object Id, ProcessName, MainWindowTitle | Format-Table -AutoSize |
+        Out-String | Add-Content -LiteralPath (Join-Path $temporary 'packaged-test.log')
+    throw
 } finally {
     $log = Join-Path $env:LOCALAPPDATA 'VPNUK-WireGuard-Recovery\wireguard-uninstall.log'
     if (Test-Path -LiteralPath $log) { Copy-Item -LiteralPath $log -Destination (Join-Path $temporary 'packaged-wireguard-uninstall.log') -Force }

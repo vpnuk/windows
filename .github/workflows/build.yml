@@ -5,6 +5,12 @@ on:
     branches: [ master, main ]
   workflow_dispatch:
     inputs:
+      signed:
+        description: 'Use paid eSigner signing (requires explicit owner approval)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
       publish:
         description: 'Publish as live release (clean filenames, v1.3.x tag, not a draft)'
         required: false
@@ -15,12 +21,26 @@ on:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      BUILD_SIGNED: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.signed == 'true' && 'true' || 'false' }}
+      VPNUK_UNSIGNED: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.signed == 'true' && 'false' || 'true' }}
     permissions:
       contents: write
 
     steps:
+      - name: Guard signing and publication mode
+        shell: pwsh
+        run: |
+          if ("${{ github.event.inputs.publish }}" -eq "true" -and $env:BUILD_SIGNED -ne 'true') {
+            throw 'Public releases require an explicitly selected signed build.'
+          }
+          Write-Host "Paid signing enabled: $env:BUILD_SIGNED"
+
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Check unsigned build signing isolation
+        run: node tests/unsigned-build.cjs
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -90,6 +110,7 @@ jobs:
         run: yarn run build-react-nsis
 
       - name: Download CodeSignTool
+        if: env.BUILD_SIGNED == 'true'
         shell: pwsh
         run: |
           $url = "https://github.com/SSLcom/CodeSignTool/releases/download/v1.3.0/CodeSignTool-v1.3.0-windows.zip"
@@ -108,6 +129,7 @@ jobs:
       # three-arch installer instead of the 62 MB single-arch output that the
       # old --prepackaged approach generated.
       - name: Build NSIS installers (x64 + ia32 + arm64, signed via sign.js)
+        if: env.BUILD_SIGNED == 'true'
         shell: pwsh
         env:
           GH_TOKEN:                    ${{ secrets.GITHUB_TOKEN }}
@@ -124,8 +146,18 @@ jobs:
           yarn run electron-builder --win nsis     --x64 --ia32 --arm64 --publish=never
           yarn run electron-builder --win nsis-web --x64             --publish=never
 
+      - name: Build unsigned private NSIS installer (x64 + ia32 + arm64)
+        if: env.BUILD_SIGNED != 'true'
+        shell: pwsh
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          # No signing secrets or CodeSignTool are provided to this step.
+          yarn run electron-builder --win nsis --x64 --ia32 --arm64 --publish=never
+          if ($LASTEXITCODE -ne 0) { throw 'Unsigned installer build failed' }
+
       # ── Verify: silent-install the full installer and check everything ───────
-      - name: Verify installed VPNUK.exe signature (silent install test)
+      - name: Verify installed VPNUK.exe and expected signing mode
         shell: pwsh
         run: |
           $installer = Get-ChildItem .\release\*.exe | Where-Object { $_.Name -like "*Setup*" } | Select-Object -First 1
@@ -133,10 +165,11 @@ jobs:
           $proc = Start-Process -FilePath $installer.FullName -ArgumentList "/S" -PassThru
           $timedOut = -not $proc.WaitForExit(480000)
           if ($timedOut) {
-            Write-Host "WARNING: installer timed out — killing"
             Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            throw 'Installer timed out'
           } else {
             Write-Host "Installer exit code: $($proc.ExitCode)"
+            if ($proc.ExitCode -notin @(0, 3010)) { throw 'Installer failed' }
           }
           Start-Sleep -Seconds 5
 
@@ -146,12 +179,23 @@ jobs:
             "C:\Program Files (x86)\VPNUK\VPNUK.exe",
             "$env:LOCALAPPDATA\Programs\VPNUK\VPNUK.exe"
           )
+          $found = $false
           foreach ($p in $candidates) {
             if (Test-Path $p) {
+              $found = $true
               $sig = Get-AuthenticodeSignature $p
               Write-Host "INSTALLED: $p  size=$((Get-Item $p).Length)  status=$($sig.Status)  signer=$($sig.SignerCertificate?.Subject ?? '(none)')"
+              if ($env:BUILD_SIGNED -eq 'true') {
+                if ($sig.Status -ne 'Valid' -or -not $sig.SignerCertificate -or
+                    $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne 'ONLINE PRIVACY SERVICES LTD') {
+                  throw 'Installed app signature/publisher verification failed'
+                }
+              } elseif ($sig.Status -ne 'NotSigned') {
+                throw 'Unsigned test app unexpectedly has a signature'
+              }
             }
           }
+          if (-not $found) { throw 'Installed VPNUK.exe was not found' }
 
           # schtasks task
           Write-Host ""
@@ -187,6 +231,7 @@ jobs:
           retention-days: 7
 
       - name: Sign installer wrappers with eSigner
+        if: env.BUILD_SIGNED == 'true'
         shell: pwsh
         env:
           ESIGNER_USERNAME:      ${{ secrets.ESIGNER_USERNAME }}
@@ -229,7 +274,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          $suffix = if ("${{ github.event.inputs.publish }}" -eq "true") { "" } else { "-build${{ github.run_number }}" }
+          $suffix = if ("${{ github.event.inputs.publish }}" -eq "true") { "" } elseif ($env:BUILD_SIGNED -eq 'true') { "-build${{ github.run_number }}" } else { "-unsigned-build${{ github.run_number }}" }
           $full = @(Get-ChildItem ".\release\*.exe" |
             Where-Object { $_.Name -notlike "*web*" -and $_.Name -notlike "*nsis-web*" })
           if ($full.Count -ne 1) { throw "Expected exactly one full installer, found $($full.Count)" }
@@ -242,10 +287,16 @@ jobs:
             if ($web[0].Name -ne $webName) { Rename-Item $web[0].FullName $webName }
           }
           # Naming must be FINAL before hashing and writing the feed.
-          node scripts/update-metadata.js ".\release\$name" ".\release\latest.yml"
-          if ($LASTEXITCODE -ne 0) { throw "Update metadata generation failed" }
+          if ($env:BUILD_SIGNED -eq 'true') {
+            node scripts/update-metadata.js ".\release\$name" ".\release\latest.yml"
+            if ($LASTEXITCODE -ne 0) { throw "Update metadata generation failed" }
+          } else {
+            # Never distribute an update feed pointing existing signed apps to unsigned code.
+            Remove-Item ".\release\latest.yml" -ErrorAction SilentlyContinue
+          }
 
       - name: Verify installer signatures
+        if: env.BUILD_SIGNED == 'true'
         shell: pwsh
         run: |
           $failed = $false
@@ -267,6 +318,18 @@ jobs:
           }
           if ($failed) { throw "One or more installer wrappers failed signature verification" }
           Write-Host "All installer signatures verified OK."
+
+      - name: Verify test installer is unsigned
+        if: env.BUILD_SIGNED != 'true'
+        shell: pwsh
+        run: |
+          $exes = @(Get-ChildItem .\release\*.exe)
+          if ($exes.Count -ne 1) { throw 'Expected one unsigned full installer' }
+          foreach ($exe in $exes) {
+            if ((Get-AuthenticodeSignature $exe.FullName).Status -ne 'NotSigned') {
+              throw "Test installer is not unsigned: $($exe.Name)"
+            }
+          }
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -296,6 +359,7 @@ jobs:
             # Dev build — rename with build-number suffix, keep as draft.
             $tag   = "v$version-build$build"
             $title = "VPNUK $version (build $build)"
+            if ($env:BUILD_SIGNED -ne 'true') { $title += ' — UNSIGNED TEST ONLY' }
             $draft = $true
 
             # Names and matching latest.yml were finalized before artifact upload.
@@ -305,13 +369,14 @@ jobs:
           foreach ($f in (Get-ChildItem .\release\*.exe))                                         { $artifacts += $f.FullName }
           foreach ($f in (Get-ChildItem .\release\nsis-web\*.exe -ErrorAction SilentlyContinue))  { $artifacts += $f.FullName }
           foreach ($f in (Get-ChildItem .\release\nsis-web\*.7z  -ErrorAction SilentlyContinue))  { $artifacts += $f.FullName }
-          if (Test-Path ".\release\latest.yml") { $artifacts += (Resolve-Path ".\release\latest.yml").Path }
+          if ($env:BUILD_SIGNED -eq 'true' -and (Test-Path ".\release\latest.yml")) { $artifacts += (Resolve-Path ".\release\latest.yml").Path }
 
           Write-Host "Tag: $tag | Title: $title | Draft: $draft"
           $artifacts | ForEach-Object { Write-Host "Artifact: $_" }
 
           if ($draft) {
-            gh release create "$tag" --title "$title" --draft --notes "Build $build" @artifacts
+            $notes = if ($env:BUILD_SIGNED -eq 'true') { "Signed private candidate. Build $build." } else { "UNSIGNED PRIVATE TEST ONLY. No paid signing. Install manually; not for the automatic updater. Test all features and optional WireGuard removal before approving a signed release. Build $build." }
+            gh release create "$tag" --title "$title" --draft --notes "$notes" @artifacts
           } else {
             gh release view "$tag" --json tagName 2>$null
             if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; refusing to replace it automatically." }

@@ -11,15 +11,22 @@ function Write-CleanupLog([string]$Message) {
     Add-Content -LiteralPath $script:CleanupLog -Value $line -Encoding UTF8
 }
 
+function ConvertTo-NativeArgument([string]$Argument) {
+    if ($Argument -match '["\r\n]') { throw 'Invalid native argument.' }
+    # NSIS requires bare switches: "/S" does not enable silent mode.
+    # Quote only empty/whitespace-containing arguments; protect trailing slashes.
+    if ($Argument -eq '' -or $Argument -match '[ \t]') {
+        return '"' + [regex]::Replace($Argument, '(\\+)$', '$1$1') + '"'
+    }
+    return $Argument
+}
+
 function Invoke-Native([string]$File, [string[]]$Arguments, [int]$Timeout = 60000) {
     # Arguments originate in verified service names, PnP IDs or MSI product IDs.
     # Do not execute registry UninstallString values or pass commands to a shell.
     $start = New-Object Diagnostics.ProcessStartInfo
     $start.FileName = $File
-    $start.Arguments = ($Arguments | ForEach-Object {
-        if ($_ -match '["\r\n]') { throw 'Invalid native argument.' }
-        '"' + $_ + '"'
-    }) -join ' '
+    $start.Arguments = ($Arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' '
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $process = [Diagnostics.Process]::Start($start)

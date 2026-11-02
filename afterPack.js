@@ -15,6 +15,10 @@ const os   = require('os');
  * back over the original so NSIS packages the signed version.
  */
 exports.default = async function afterPack(context) {
+  if (process.env.VPNUK_UNSIGNED === 'true') {
+    console.log('[afterPack] Explicit unsigned test mode — no signing service used');
+    return;
+  }
   const cstDir = process.env.CODE_SIGN_TOOL_PATH;
   if (!cstDir) {
     console.log('[afterPack] CODE_SIGN_TOOL_PATH not set – skipping app exe signing');
