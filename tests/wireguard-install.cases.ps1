@@ -24,7 +24,25 @@ try {
     }
     $file = Join-Path $temporary 'test.msi'
     [IO.File]::WriteAllText($file, 'synthetic MSI')
-    $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+    Add-Type -Path (Join-Path $PSScriptRoot '..\nsis\WireGuardHash.cs')
+    Case 'BLAKE2b-256 matches independent empty, partial, full and multiple-block vectors' {
+        $vectors = @{
+            0 = '0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8'
+            127 = 'f2fe67ff342e21b8f45e8f2e0bcd1d9243245d50ee6c78042e9c491388791c72'
+            128 = 'c3582f71ebb2be66fa5dd750f80baae97554f3b015663c8be377cfcb2488c1d1'
+            129 = 'f7f3c46ba2564ff4c4c162da1f5b605f9f1c4aa6a20652a9f9a337c1a2f5b9c9'
+            256 = '582f782226018ec33076bd8d1c42413530ac7e1126260ffc0f306ba3befc3f24'
+            1024 = 'd75edc54bb5acee4cc8610568e82872ce79758afd38c51dfe6ccfab01c2d191f'
+        }
+        foreach ($length in $vectors.Keys) {
+            $bytes = New-Object byte[] $length
+            for ($i = 0; $i -lt $length; $i++) { $bytes[$i] = $i % 251 }
+            [IO.File]::WriteAllBytes($file, $bytes)
+            Assert ([VpnukWireGuardHash]::FileBlake2b256($file) -eq $vectors[$length]) "BLAKE2b-256 vector failed at length $length"
+        }
+    }
+    [IO.File]::WriteAllText($file, 'synthetic MSI')
+    $hash = [VpnukWireGuardHash]::FileBlake2b256($file)
     $script:signature = [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=WireGuard LLC, O=WireGuard LLC, C=US' } }
     function Get-AuthenticodeSignature { param($LiteralPath); return $script:signature }
     Case 'MSI hash and publisher are both required' {

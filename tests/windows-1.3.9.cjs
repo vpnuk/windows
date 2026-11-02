@@ -580,6 +580,8 @@ test('both WireGuard install entry points use the shared quiet MSI helper', () =
     const script = fs.readFileSync(path.join(root, 'nsis/wireguard-install.ps1'), 'utf8').replace(/\r\n/g, '\n');
     assert(script.includes("'/qn', '/norestart', 'DO_NOT_LAUNCH=1'"));
     assert(script.includes('Assert-WgMsi $file $entry.Hash'));
+    assert(script.includes('[VpnukWireGuardHash]::FileBlake2b256($File)'));
+    assert(!script.includes('-Algorithm SHA256'), 'official manifest uses BLAKE2b-256, not SHA256');
     assert(script.indexOf('Assert-WgMsi $file') < script.indexOf('    Stop-WgManager\n'));
     assert(script.includes('Assert-NoActiveWgTunnels'));
     assert(!script.includes('Stop-WgServices'), 'dependency install must not sweep tunnel services');
@@ -588,6 +590,12 @@ test('both WireGuard install entry points use the shared quiet MSI helper', () =
     assert(handler.includes('code === 3010'));
     const files = require('../package.json').build.extraFiles;
     assert(files.some(file => file.to === 'install-tools/wireguard-install.ps1'));
+    assert(files.some(file => file.to === 'install-tools/WireGuardHash.cs'));
+    assert(fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8').includes('File /oname=$PLUGINSDIR\\WireGuardHash.cs'));
+    for (const testFile of ['wireguard-install.cases.ps1', 'wireguard-install-native.ps1']) {
+        assert(fs.readFileSync(path.join(root, 'tests', testFile), 'utf8').trimEnd().endsWith('exit 0'),
+            `${testFile} must return explicit success to its workflow caller`);
+    }
     assert(files.some(file => file.to === 'install-tools/wireguard-uninstall.ps1'));
 });
 test('WireGuard app installer uses native PowerShell, preserves restart and reports failures', async () => {

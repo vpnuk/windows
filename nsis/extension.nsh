@@ -514,6 +514,7 @@ vpnuk_identity_saved:
             InitPluginsDir
             File /oname=$PLUGINSDIR\wireguard-install.ps1 "${VPNUK_NSIS_DIRECTORY}\wireguard-install.ps1"
             File /oname=$PLUGINSDIR\wireguard-uninstall.ps1 "${VPNUK_NSIS_DIRECTORY}\wireguard-uninstall.ps1"
+            File /oname=$PLUGINSDIR\WireGuardHash.cs "${VPNUK_NSIS_DIRECTORY}\WireGuardHash.cs"
             StrCpy $R6 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
             IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 +2
             StrCpy $R6 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"

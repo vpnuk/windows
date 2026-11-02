@@ -46,7 +46,7 @@ connection logs, configuration tools and Live Help.
 ### Quiet WireGuard installation and updates
 - Use the official, native-architecture WireGuard MSI rather than launching
   the bootstrap EXE with unsupported quiet/no-launch expectations.
-- Verify its SHA256 and Authenticode WireGuard publisher before installing.
+- Verify its BLAKE2b-256 manifest checksum and Authenticode WireGuard publisher before installing.
 - Install without MSI windows or an automatic restart; do not launch the
   standalone WireGuard app afterward.
 - Close the existing WireGuard manager before installation and leave it closed

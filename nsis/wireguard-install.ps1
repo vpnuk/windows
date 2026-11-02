@@ -12,7 +12,10 @@ function Get-WgMsiEntry([string]$Manifest, [string]$Architecture) {
 }
 
 function Assert-WgMsi([string]$File, [string]$ExpectedHash) {
-    if ((Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash -ine $ExpectedHash) {
+    if (-not ('VpnukWireGuardHash' -as [type])) {
+        Add-Type -Path (Join-Path $PSScriptRoot 'WireGuardHash.cs')
+    }
+    if ([VpnukWireGuardHash]::FileBlake2b256($File) -ine $ExpectedHash) {
         throw 'WireGuard MSI checksum verification failed. Nothing was installed.'
     }
     $signature = Get-AuthenticodeSignature -LiteralPath $File
@@ -54,7 +57,7 @@ function Invoke-QuietWgInstall {
     if (-not $architecture) { $architecture = $env:PROCESSOR_ARCHITECTURE }
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     # WireGuard's official manifest supplies the architecture-specific MSI and
-    # SHA256. Authenticode independently verifies the downloaded MSI publisher.
+    # BLAKE2b-256. Authenticode independently verifies the downloaded MSI publisher.
     $temporary = Join-Path ([IO.Path]::GetTempPath()) ('vpnuk-wg-install-' + [guid]::NewGuid())
     New-Item -ItemType Directory -Path $temporary | Out-Null
     # latest.sig has a non-text Content-Type. Read the saved bytes explicitly;

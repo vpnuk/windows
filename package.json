@@ -91,6 +91,10 @@
         "to": "install-tools/wireguard-install.ps1"
       },
       {
+        "from": "nsis/WireGuardHash.cs",
+        "to": "install-tools/WireGuardHash.cs"
+      },
+      {
         "from": "nsis/wireguard-uninstall.ps1",
         "to": "install-tools/wireguard-uninstall.ps1"
       },

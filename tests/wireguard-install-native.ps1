@@ -34,3 +34,4 @@ try { $service.WaitForStatus([ServiceProcess.ServiceControllerStatus]::Running, 
 finally { $service.Dispose() }
 Install-AndAssertClosed
 Write-Host 'PASS real repair/update closes an existing WireGuard manager and does not reopen it'
+exit 0
