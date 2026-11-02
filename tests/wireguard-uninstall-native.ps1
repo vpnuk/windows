@@ -6,6 +6,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or $env:RUN
 $temporary = Join-Path $env:RUNNER_TEMP ('vpnuk-wg-removal-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $temporary | Out-Null
 . (Join-Path $PSScriptRoot '..\nsis\wireguard-uninstall.ps1') -Mode RemoveWireGuard -LogDirectory $temporary
+Initialize-ServiceController
 $exe = 'C:\Program Files\WireGuard\wireguard.exe'
 $name = 'vpnuk-uninstall-check'
 $config = Join-Path $temporary ($name + '.conf')
@@ -58,7 +59,7 @@ Endpoint = 127.0.0.1:9
     if (-not (Test-Path -LiteralPath $exe) -or -not @(Get-WgProducts).Count -or -not @(Get-VerifiedWgDevices).Count) {
         throw 'Default VPNUK uninstall removed shared WireGuard or its unrelated adapter.'
     }
-    $service = New-Object ServiceProcess.ServiceController ('WireGuardTunnel$' + $name)
+    $service = New-Object System.ServiceProcess.ServiceController ('WireGuardTunnel$' + $name)
     try {
         if ($service.Status -ne [ServiceProcess.ServiceControllerStatus]::Running) {
             throw 'Default uninstall interrupted an unrelated WireGuard tunnel.'

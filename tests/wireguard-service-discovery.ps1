@@ -3,6 +3,11 @@ if ($env:OS -ne 'Windows_NT') { throw 'This read-only service discovery check re
 . (Join-Path $PSScriptRoot '..\nsis\wireguard-uninstall.ps1') -LogDirectory $env:TEMP
 # Run in a fresh powershell.exe -NoProfile process, exactly as the packaged
 # helper does. Do not preload ServiceController via service cmdlets or mocks.
+Initialize-ServiceController
+# Also cover direct construction used by the packaged preservation test,
+# which runs in another fresh PowerShell process.
+$controller = New-Object System.ServiceProcess.ServiceController 'WireGuardManager'
+$controller.Dispose()
 $services = @(Get-WgServices)
 try {
     if (-not ('System.ServiceProcess.ServiceController' -as [type])) {
