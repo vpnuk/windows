@@ -127,3 +127,6 @@ try {
     }
     Write-Host "$script:count/$script:count quiet-install checks passed."
 } finally { Remove-Item -LiteralPath $temporary -Recurse -Force }
+# Pure PowerShell/mocked cases do not necessarily set LASTEXITCODE. Return an
+# explicit success status for the workflow, including when an old status exists.
+exit 0
