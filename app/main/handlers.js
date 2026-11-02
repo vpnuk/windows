@@ -29,7 +29,6 @@ const {
     importRootCert
 } = require('./utils/certs');
 const { enableAutoUpdate } = require('./updater');
-const { downloadWireGuardInstaller } = require('../modules/catalogs');
 const { bypassPrefixes } = require('../modules/ip-bypass');
 const { installBypassRoutes, cleanupBypassRoutes } = require('./utils/bypass-routes');
 
@@ -37,6 +36,7 @@ const isDev = process.env.ELECTRON_ENV === 'Dev';
 
 let vpnConnection = null;
 let connectionStarting = false;
+let wireGuardInstalling = false;
 let connectionStartTask = null;
 
 // ─── Kill-switch crash-recovery state file ────────────────────────────────────
@@ -388,7 +388,7 @@ ipcMain.on('ovpn-update-install', (event, arg) => {
 // ─── WireGuard install ────────────────────────────────────────────────────────
 
 ipcMain.on('wg-update-request', async (event, arg) => {
-    if (checkWireGuardInstalled()) return;
+    if (wireGuardInstalling || checkWireGuardInstalled()) return;
     if (dialog.showMessageBoxSync({
         type: 'question',
         icon: path.join(__dirname, '../assets/icon.png'),
@@ -398,18 +398,20 @@ ipcMain.on('wg-update-request', async (event, arg) => {
         cancelId: 1
     }) !== 1) {
         try {
+            wireGuardInstalling = true;
             sendNotification(event.sender, {
                 type: 'info',
                 title: 'Installing WireGuard',
-                message: 'Downloading WireGuard installer...'
+                message: 'Downloading and verifying the official WireGuard MSI. Installation will run quietly without opening the standalone app.'
             });
-            const installerPath = await downloadWireGuardInstaller(arg.installer);
-            const code = installWireGuard(installerPath);
-            if (code === 0) {
+            const code = await installWireGuard();
+            if (code === 0 || code === 3010) {
                 sendNotification(event.sender, {
                     type: 'info',
                     title: 'WireGuard Installed',
-                    message: 'WireGuard installed successfully. You can now create WireGuard profiles.'
+                    message: code === 3010
+                        ? 'WireGuard installed. Restart Windows before connecting. The standalone WireGuard app has been left closed.'
+                        : 'WireGuard installed successfully. You can now create WireGuard profiles. The standalone WireGuard app has been left closed.'
                 });
             } else {
                 sendNotification(event.sender, {
@@ -424,6 +426,8 @@ ipcMain.on('wg-update-request', async (event, arg) => {
                 title: 'WireGuard Install Error',
                 message: err.message || 'Installation failed. Please install WireGuard manually.'
             });
+        } finally {
+            wireGuardInstalling = false;
         }
     }
 });

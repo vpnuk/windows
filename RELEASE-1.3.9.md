@@ -43,6 +43,19 @@ connection logs, configuration tools and Live Help.
 - Sensitive keys are redacted; unrelated tunnels' entries are excluded.
 - Adapter startup errors are distinguished from credential errors.
 
+### Quiet WireGuard installation and updates
+- Use the official, native-architecture WireGuard MSI rather than launching
+  the bootstrap EXE with unsupported quiet/no-launch expectations.
+- Verify its SHA256 and Authenticode WireGuard publisher before installing.
+- Install without MSI windows or an automatic restart; do not launch the
+  standalone WireGuard app afterward.
+- Close the existing WireGuard manager before installation and leave it closed
+  after installation or repair.
+- Require users to disconnect active WireGuard tunnels first; do not force-kill
+  tunnel processes or remove standalone configurations during an update.
+- Report installation failures and restart-required results rather than
+  presenting every completed process as a successful install.
+
 ### Optional WireGuard removal
 - Uninstall offers an unchecked **Uninstall WireGuard and its adapters** option.
 - Leaving it unchecked preserves shared WireGuard software and unrelated tunnels.
@@ -75,6 +88,11 @@ Windows may display publisher/security warnings.
 - Test split tunnelling for both protocols, including with the kill switch.
 - Check native WireGuard diagnostics in the Log tab.
 - Check startup, auto-connect, DNS/MTU and existing protocol controls.
+- Install WireGuard on a clean setup and confirm it does not open afterward.
+- With the WireGuard manager open but tunnels disconnected, select installation/
+  update in VPNUK Setup and confirm the manager closes and remains closed.
+- An active WireGuard tunnel must block dependency installation with a request
+  to disconnect first, not be forcibly killed.
 - On a disposable Windows setup, uninstall with WireGuard removal unchecked:
   shared WireGuard and an unrelated tunnel must remain.
 - Reinstall, export any standalone configurations, then uninstall with removal

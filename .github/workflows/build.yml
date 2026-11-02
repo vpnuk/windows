@@ -92,18 +92,18 @@ jobs:
           & .\tests\wireguard-uninstall.cases.ps1
           if ($LASTEXITCODE -ne 0) { throw "WireGuard uninstall regression checks failed" }
 
+      - name: Check quiet WireGuard installer safety cases
+        shell: powershell
+        run: |
+          & .\tests\wireguard-install.cases.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Quiet installer safety cases failed' }
+
       - name: Check real WireGuard adapter creation and fresh-config reconnect
-        timeout-minutes: 8
+        timeout-minutes: 15
         shell: pwsh
         run: |
-          $installer = Join-Path $env:RUNNER_TEMP 'wireguard-installer.exe'
-          Invoke-WebRequest 'https://download.wireguard.com/windows-client/wireguard-installer.exe' -OutFile $installer
-          $signature = Get-AuthenticodeSignature $installer
-          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|,\s*)O=WireGuard LLC(,|$)') {
-            throw 'WireGuard installer signature is not valid for WireGuard LLC'
-          }
-          $p = Start-Process $installer -ArgumentList '/quiet' -Wait -PassThru
-          if ($p.ExitCode -notin @(0, 3010)) { throw "WireGuard install failed: $($p.ExitCode)" }
+          powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File .\tests\wireguard-install-native.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Quiet install/repair native checks failed' }
           node tests/wireguard-native.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Native WireGuard adapter/lifecycle checks failed' }
 
@@ -233,6 +233,15 @@ jobs:
         with:
           name: wireguard-removal-check-${{ github.run_number }}
           path: ${{ runner.temp }}/vpnuk-wg-removal-*/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Preserve quiet installer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wireguard-install-check-${{ github.run_number }}
+          path: ~/AppData/Local/VPNUK-WireGuard-Recovery/wireguard-install*.log
           if-no-files-found: ignore
           retention-days: 7
 

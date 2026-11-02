@@ -233,7 +233,6 @@ vpnuk_identity_saved:
     Var height
 
     Var wgVersion
-    Var wgInstallerUrl
     Var wgPath
     Var installedWgVer
     Var wgDialog
@@ -361,8 +360,6 @@ vpnuk_identity_saved:
             nsJSON::Get "windows" "wireguard" "version" /end
             Pop $wgVersion
 
-            nsJSON::Get "windows" "wireguard" "installer" /end
-            Pop $wgInstallerUrl
         ${Else}
             MessageBox MB_OK "Error loading versions.json:$\n$0"
         ${EndIf}
@@ -487,28 +484,24 @@ vpnuk_identity_saved:
             GetDlgItem $0 $hWndParent 1
             EnableWindow $0 0
 
-            ; WireGuard's MSI handles upgrades. Do not pre-uninstall shared
-            ; WireGuard or delete standalone tunnels during an app upgrade.
-
-            ${ClearStack}
-            inetc::get /NOCANCEL "$wgInstallerUrl" "$TEMP\wgInstaller.exe" /END
+            ; Official MSI, quiet and DO_NOT_LAUNCH. Never execute a stale
+            ; bootstrap EXE or pre-uninstall shared software/configurations.
+            InitPluginsDir
+            File /oname=$PLUGINSDIR\wireguard-install.ps1 "${VPNUK_NSIS_DIRECTORY}\wireguard-install.ps1"
+            File /oname=$PLUGINSDIR\wireguard-uninstall.ps1 "${VPNUK_NSIS_DIRECTORY}\wireguard-uninstall.ps1"
+            StrCpy $R6 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+            IfFileExists "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" 0 +2
+            StrCpy $R6 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+            nsExec::ExecToStack /TIMEOUT=480000 '"$R6" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\wireguard-install.ps1"'
+            Pop $0
             Pop $1
-
-            ${If} $1 == "OK"
-                nsExec::ExecToStack /TIMEOUT=240000 '"$TEMP\wgInstaller.exe" /quiet'
-                Pop $0
-                Pop $1
-                ${If} $0 == 3010
-                    SetRebootFlag true
-                    MessageBox MB_OK|MB_ICONEXCLAMATION "WireGuard installation requires a Windows restart."
-                ${ElseIf} $0 != 0
-                    MessageBox MB_OK "Error installing WireGuard (result $0):$\n$1"
-                    Abort
-                ${EndIf}
-                ; Do not force-kill wireguard.exe: its tunnel services use the
-                ; same executable and must be stopped through Service Control.
-            ${Else}
-                MessageBox MB_OK "Error downloading WireGuard:$\n$1"
+            GetDlgItem $R6 $hWndParent 1
+            EnableWindow $R6 1
+            ${If} $0 == 3010
+                SetRebootFlag true
+                MessageBox MB_OK|MB_ICONEXCLAMATION "WireGuard installed. Restart Windows before connecting."
+            ${ElseIf} $0 != 0
+                MessageBox MB_OK "WireGuard installation did not complete (result $0):$\n$1"
                 Abort
             ${EndIf}
 

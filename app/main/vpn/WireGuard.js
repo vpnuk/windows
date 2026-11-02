@@ -170,8 +170,6 @@ function checkWireGuardInstalled() {
     try { getWireGuardExePath(); return true; } catch { return false; }
 }
 
-function installWireGuard(installerPath) {
-    return cp.spawnSync(installerPath, ['/quiet'], { shell: false, windowsHide: true }).status;
-}
+const { installWireGuard } = require('../utils/wg-install');
 
 module.exports = { WireGuard, checkWireGuardInstalled, installWireGuard, cleanupOrphanedTunnels };

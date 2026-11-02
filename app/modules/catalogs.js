@@ -116,16 +116,6 @@ const getLinkByArch = node => downloadForArch(node);
 
 // ─── WireGuard Install Check ──────────────────────────────────────────────────
 
-const downloadWireGuardInstaller = (installerUrl) => {
-    const tmpPath = path.join(require('os').tmpdir(), 'wireguard-installer.exe');
-    return axios
-        .get(installerUrl, { responseType: 'arraybuffer' })
-        .then(response => fs.writeFileSync(tmpPath, new Buffer.from(response.data)))
-        .catch(error => console.log('WG installer download error', error))
-        .then(() => tmpPath);
-};
-exports.downloadWireGuardInstaller = downloadWireGuardInstaller;
-
 // ─── initializeCatalogs ───────────────────────────────────────────────────────
 
 function initializeCatalogs() {

@@ -556,8 +556,42 @@ test('WireGuard software removal is unchecked by default, upgrade-guarded, and r
     assert(!nsis.includes('"$1" /uninstall'));
     const installPage = nsis.match(/Function wgPageLeave[\s\S]*?FunctionEnd/)[0];
     assert(!installPage.includes('uninstallWg'), 'dependency updates must use MSI upgrade, not pre-uninstall');
-    assert(installPage.includes('wgInstaller.exe" /quiet'));
+    assert(installPage.includes('wireguard-install.ps1'));
+    assert(!installPage.includes('wgInstaller.exe" /quiet'), 'bootstrapper does not support no-launch MSI properties');
     assert(!installPage.includes('taskkill /F /IM wireguard.exe'), 'never kill every native tunnel to close the tray UI');
+});
+test('both WireGuard install entry points use the shared quiet MSI helper', () => {
+    const script = fs.readFileSync(path.join(root, 'nsis/wireguard-install.ps1'), 'utf8');
+    assert(script.includes("'/qn', '/norestart', 'DO_NOT_LAUNCH=1'"));
+    assert(script.includes('Assert-WgMsi $file $entry.Hash'));
+    assert(script.indexOf('Assert-WgMsi $file') < script.indexOf('    Stop-WgManager\n'));
+    assert(script.includes('Assert-NoActiveWgTunnels'));
+    assert(!script.includes('Stop-WgServices'), 'dependency install must not sweep tunnel services');
+    const handler = fs.readFileSync(path.join(root, 'app/main/handlers.js'), 'utf8');
+    assert(!handler.includes('downloadWireGuardInstaller'));
+    assert(handler.includes('code === 3010'));
+    const files = require('../package.json').build.extraFiles;
+    assert(files.some(file => file.to === 'install-tools/wireguard-install.ps1'));
+    assert(files.some(file => file.to === 'install-tools/wireguard-uninstall.ps1'));
+});
+test('WireGuard app installer uses native PowerShell, preserves restart and reports failures', async () => {
+    let result = { error: { code: 3010 } };
+    const api = load('app/main/utils/wg-install.js', {
+        fs: { existsSync: () => true },
+        child_process: { execFile(exe, args, options, callback) {
+            assert(exe.includes('Sysnative'));
+            assert(args.includes('-NonInteractive'));
+            assert(args.some(arg => arg.endsWith('wireguard-install.ps1')));
+            assert.equal(options.shell, false);
+            assert.equal(options.windowsHide, true);
+            callback(result.error || null, result.stdout, '');
+        } },
+    });
+    assert.equal(await api.installWireGuard(), 3010);
+    result = { error: { code: 1 }, stdout: 'Disconnect all WireGuard tunnels before installing' };
+    await assert.rejects(api.installWireGuard(), /Disconnect all WireGuard tunnels/);
+    result = { error: { code: 'ETIMEDOUT' } };
+    await assert.rejects(api.installWireGuard(), /ETIMEDOUT/);
 });
 test('uninstall helper reports failures and restart requirements without erasing native exit codes', () => {
     const nsis = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
