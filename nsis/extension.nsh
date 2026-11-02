@@ -163,6 +163,20 @@ send:
     !insertmacro runWireGuardCleanup "OwnedTunnels"
 !macroend
 
+!macro logWireGuardUninstall MESSAGE
+    ; Call with current-user shell context. Preserve scratch registers and
+    ; record only uninstall stages/options, never credentials or config keys.
+    Push $R4
+    CreateDirectory "$LOCALAPPDATA\VPNUK-WireGuard-Recovery"
+    ClearErrors
+    FileOpen $R4 "$LOCALAPPDATA\VPNUK-WireGuard-Recovery\wireguard-uninstall.log" a
+    ${IfNot} ${Errors}
+        FileWrite $R4 "VPNUK uninstaller: ${MESSAGE}$\r$\n"
+        FileClose $R4
+    ${EndIf}
+    Pop $R4
+!macroend
+
 ; Runs for interactive uninstall AND silent upgrades, before EB removes files
 ; or --delete-app-data. Page callbacks are not lifecycle hooks.
 !macro customRemoveFiles
@@ -177,21 +191,32 @@ send:
     MessageBox MB_OK "Cannot preserve the WireGuard cleanup record. No application files were removed. Check disk permissions and try again."
     Abort
 vpnuk_identity_saved:
-    !insertmacro cleanupVpnukTunnels
+    !insertmacro logWireGuardUninstall "WireGuard removal selection=$wgRemovalFlag"
+    ; Dispatch the chosen LOCAL cleanup immediately. Do not put network/account
+    ; cleanup between the user's selection and shared-software removal.
+    ${IfNot} ${isUpdated}
+        ${If} $wgRemovalFlag == "1"
+            !insertmacro logWireGuardUninstall "Starting selected full WireGuard removal"
+            !insertmacro runWireGuardCleanup "RemoveWireGuard"
+        ${Else}
+            !insertmacro logWireGuardUninstall "WireGuard not selected; preserving shared installation"
+            !insertmacro cleanupVpnukTunnels
+        ${EndIf}
+    ${Else}
+        !insertmacro logWireGuardUninstall "Upgrade; preserving shared WireGuard"
+        !insertmacro cleanupVpnukTunnels
+    ${EndIf}
+    !insertmacro logWireGuardUninstall "Local cleanup returned; starting remote peer cleanup"
     ; No credentials on the command line. Failure/offline/timeout leaves the
     ; durable device-label record for authenticated cleanup after reinstall.
-    nsExec::ExecToStack '"$INSTDIR\VPNUK.exe" --cleanup-wireguard'
+    nsExec::ExecToStack /TIMEOUT=90000 '"$INSTDIR\VPNUK.exe" --cleanup-wireguard'
     Pop $0
     Pop $1
     ${If} $0 != 0
         DetailPrint "WireGuard server cleanup pending; the device identity is retained for recovery after reinstall."
-    ${EndIf}
-    ; The checkbox is available only for explicit interactive removal.
-    ; Never uninstall shared WireGuard as a side effect of an app update.
-    ${IfNot} ${isUpdated}
-        ${If} $wgRemovalFlag == "1"
-            !insertmacro runWireGuardCleanup "RemoveWireGuard"
-        ${EndIf}
+        !insertmacro logWireGuardUninstall "Remote cleanup pending (result $0); recovery identity retained"
+    ${Else}
+        !insertmacro logWireGuardUninstall "Remote cleanup completed"
     ${EndIf}
     Delete "$APPDATA\VPNUK\vpnuk-*.conf"
     Delete "$APPDATA\VPNUK\shared.conf"
@@ -566,7 +591,6 @@ FunctionEnd
         ; Pre-initialise flags so validation in Leave never sees empty string
         StrCpy $ovpnFlag "false"
         StrCpy $userDataFlag "false"
-        StrCpy $wgRemovalFlag "0"
 
         !insertmacro MUI_HEADER_TEXT $(title) $(subtitle)
         nsDialogs::Create 1018
@@ -596,23 +620,27 @@ FunctionEnd
         ${EndIf}
 
     ; ------------- Optional shared WireGuard removal -------------
-        ${NSD_CreateCheckbox} 0u 36u 100% 12u "Uninstall WireGuard and its adapters"
+        ${NSD_CreateCheckbox} 0u 40u 100% 12u "Uninstall WireGuard"
         Pop $wgRemovalCheckbox
-        ${NSD_Uncheck} $wgRemovalCheckbox
-        ${NSD_CreateLabel} 12u 50u 95% 30u "Removes WireGuard for all apps and deletes its saved tunnels. Export any configurations you want to keep first."
-        Pop $hwnd
+        ${NSD_AddStyle} $wgRemovalCheckbox ${WS_GROUP}
+        ${NSD_OnClick} $wgRemovalCheckbox un.wgRemovalClick
+        ${If} $wgRemovalFlag == "1"
+            ${NSD_Check} $wgRemovalCheckbox
+        ${Else}
+            ${NSD_Uncheck} $wgRemovalCheckbox
+        ${EndIf}
 
     ; ------------- User data -------------
-        ${NSD_CreateLabel} 0u 84u 100% 12u "Clear application user data"
+        ${NSD_CreateLabel} 0u 64u 100% 12u "Clear application user data"
         Pop $hwnd
 
-        ${NSD_CreateRadioButton} 12u 98u 100% 12u "Yes"
+        ${NSD_CreateRadioButton} 12u 78u 100% 12u "Yes"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "true"
         ${NSD_OnClick} $hwnd un.dataRadioClick
         ${NSD_AddStyle} $hwnd ${WS_GROUP}
 
-        ${NSD_CreateRadioButton} 12u 110u 100% 12u "No"
+        ${NSD_CreateRadioButton} 12u 90u 100% 12u "No"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "false"
         ${NSD_OnClick} $hwnd un.dataRadioClick
@@ -632,6 +660,11 @@ FunctionEnd
     Function un.dataRadioClick
         ${radioBtnClick}
         Pop $userDataFlag
+    FunctionEnd
+
+    Function un.wgRemovalClick
+        Pop $R0
+        ${NSD_GetState} $R0 $wgRemovalFlag
     FunctionEnd
 
     Function un.OvpnPageLeave

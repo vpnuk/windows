@@ -7,6 +7,7 @@ $temporary = Join-Path $env:RUNNER_TEMP ('vpnuk-wg-removal-' + [guid]::NewGuid()
 New-Item -ItemType Directory -Path $temporary | Out-Null
 . (Join-Path $PSScriptRoot '..\nsis\wireguard-uninstall.ps1') -Mode RemoveWireGuard -LogDirectory $temporary
 Initialize-ServiceController
+. (Join-Path $PSScriptRoot 'wireguard-uninstall-dialog.ps1')
 $exe = 'C:\Program Files\WireGuard\wireguard.exe'
 $name = 'vpnuk-uninstall-check'
 $config = Join-Path $temporary ($name + '.conf')
@@ -15,19 +16,10 @@ if (-not (Test-Path -LiteralPath $appExe)) { throw 'VPNUK must be installed befo
 function Invoke-PackagedUninstall([bool]$RemoveWireGuard) {
     $uninstallers = @(Get-ChildItem -LiteralPath ([IO.Path]::GetDirectoryName($appExe)) -Filter '*uninstall*.exe')
     if ($uninstallers.Count -ne 1) { throw 'Expected one packaged VPNUK uninstaller.' }
-    $arguments = @('/S')
-    if ($RemoveWireGuard) { $arguments += '/REMOVEWIREGUARD' }
-    $message = "Starting packaged uninstall; explicit shared WireGuard removal = $RemoveWireGuard"
+    $message = "Starting real interactive packaged uninstall; checkbox removal = $RemoveWireGuard"
     Write-Host $message
     Add-Content -LiteralPath (Join-Path $temporary 'packaged-test.log') -Value $message
-    $code = Invoke-Native $uninstallers[0].FullName $arguments 240000
-    if ($code -ne 0) { throw "Packaged VPNUK uninstaller failed: $code" }
-    # NSIS can relaunch its uninstaller from TEMP and return before it completes.
-    $deadline = (Get-Date).AddSeconds(180)
-    while (Test-Path -LiteralPath $appExe) {
-        if ((Get-Date) -ge $deadline) { throw 'Packaged uninstaller did not remove VPNUK within the timeout.' }
-        Start-Sleep -Milliseconds 500
-    }
+    Invoke-CheckboxUninstall $uninstallers[0].FullName $appExe $RemoveWireGuard (Join-Path $temporary 'packaged-test.log')
 }
 function New-TestKey {
     $bytes = New-Object byte[] 32
@@ -80,6 +72,9 @@ Endpoint = 127.0.0.1:9
     $logText = [IO.File]::ReadAllText($log)
     if ($logText -match 'NOT COMPLETE:|RESTART REQUIRED:' -or $logText -notmatch 'VERIFIED:') {
         throw 'Packaged cleanup did not report verified completion.'
+    }
+    if ($logText -notmatch 'WireGuard removal selection=1' -or $logText -notmatch 'Beginning cleanup mode RemoveWireGuard') {
+        throw 'Actual checkbox selection did not reach the full WireGuard removal worker.'
     }
     Write-Host 'PASS packaged optional WireGuard MSI uninstall, active-tunnel stop and adapter/software absence verification'
 } catch {

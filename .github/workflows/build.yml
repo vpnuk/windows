@@ -219,7 +219,7 @@ jobs:
             }
           }
 
-      - name: Verify packaged optional WireGuard uninstall and default preservation
+      - name: Verify actual uninstall checkbox, WireGuard removal and default preservation
         timeout-minutes: 12
         shell: powershell
         run: |

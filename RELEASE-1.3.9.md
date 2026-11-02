@@ -57,7 +57,7 @@ connection logs, configuration tools and Live Help.
   presenting every completed process as a successful install.
 
 ### Optional WireGuard removal
-- Uninstall offers an unchecked **Uninstall WireGuard and its adapters** option.
+- Uninstall offers a simple unchecked **Uninstall WireGuard** checkbox.
 - Leaving it unchecked preserves shared WireGuard software and unrelated tunnels.
 - Selecting it removes shared WireGuard software, its tunnels and verified
   WireGuard adapters. **Export standalone configurations before selecting it.**

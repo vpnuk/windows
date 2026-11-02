@@ -548,10 +548,16 @@ test('WireGuard software removal is unchecked by default, upgrade-guarded, and r
     assert(init.includes('${If} ${Silent}'));
     assert(init.includes('${GetOptions} $R0 "/REMOVEWIREGUARD" $R1'));
     assert(page.includes('${NSD_Uncheck} $wgRemovalCheckbox'));
-    assert(page.includes('Removes WireGuard for all apps and deletes its saved tunnels.'));
+    assert(page.includes('"Uninstall WireGuard"'));
+    assert(!page.includes('Removes WireGuard for all apps'));
+    assert(page.includes('${NSD_OnClick} $wgRemovalCheckbox un.wgRemovalClick'));
+    assert(!page.includes('StrCpy $wgRemovalFlag "0"'), 'page recreation must not erase the saved selection');
     assert(leave.includes('${NSD_GetState} $wgRemovalCheckbox $wgRemovalFlag'));
     assert(hook.includes('${IfNot} ${isUpdated}'));
     assert(hook.includes('${If} $wgRemovalFlag == "1"'));
+    assert(hook.includes('WireGuard removal selection=$wgRemovalFlag'));
+    assert(hook.indexOf('runWireGuardCleanup "RemoveWireGuard"') < hook.indexOf('--cleanup-wireguard'),
+        'selected local removal must not wait behind remote cleanup');
     assert(hook.indexOf('runWireGuardCleanup "RemoveWireGuard"') < hook.indexOf('Delete "$APPDATA'));
     assert(!nsis.includes('"$1" /uninstall'));
     const installPage = nsis.match(/Function wgPageLeave[\s\S]*?FunctionEnd/)[0];
@@ -560,8 +566,18 @@ test('WireGuard software removal is unchecked by default, upgrade-guarded, and r
     assert(!installPage.includes('wgInstaller.exe" /quiet'), 'bootstrapper does not support no-launch MSI properties');
     assert(!installPage.includes('taskkill /F /IM wireguard.exe'), 'never kill every native tunnel to close the tray UI');
 });
+test('packaged removal tests click the real checkbox instead of bypassing it with a switch', () => {
+    const native = fs.readFileSync(path.join(root, 'tests/wireguard-uninstall-native.ps1'), 'utf8');
+    const ui = fs.readFileSync(path.join(root, 'tests/wireguard-uninstall-dialog.ps1'), 'utf8');
+    assert(native.includes('Invoke-CheckboxUninstall'));
+    assert(!native.includes("$arguments += '/REMOVEWIREGUARD'"));
+    assert(ui.includes('WireGuard removal must be unchecked by default.'));
+    assert(ui.includes('[VpnukUninstallDialog]::Click($checkbox[0].Handle)'));
+    assert(ui.includes('Actual checkbox state did not match'));
+    assert(native.includes("Beginning cleanup mode RemoveWireGuard"));
+});
 test('both WireGuard install entry points use the shared quiet MSI helper', () => {
-    const script = fs.readFileSync(path.join(root, 'nsis/wireguard-install.ps1'), 'utf8');
+    const script = fs.readFileSync(path.join(root, 'nsis/wireguard-install.ps1'), 'utf8').replace(/\r\n/g, '\n');
     assert(script.includes("'/qn', '/norestart', 'DO_NOT_LAUNCH=1'"));
     assert(script.includes('Assert-WgMsi $file $entry.Hash'));
     assert(script.indexOf('Assert-WgMsi $file') < script.indexOf('    Stop-WgManager\n'));
