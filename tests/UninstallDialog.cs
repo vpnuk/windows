@@ -13,8 +13,12 @@ public static class VpnukUninstallDialog
         public string ClassName;
         public int Id;
         public bool Enabled;
+        public int Top;
     }
     private delegate bool EnumProc(IntPtr window, IntPtr parameter);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out Rect rectangle);
     [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr parameter);
     [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr parameter);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, StringBuilder text, int size);
@@ -31,8 +35,12 @@ public static class VpnukUninstallDialog
         var className = new StringBuilder(256);
         GetWindowText(window, text, text.Capacity);
         GetClassName(window, className, className.Capacity);
+        Rect rectangle;
+        // Controls can disappear during a page transition; a zero rectangle
+        // keeps that stale snapshot out of the radio-group match.
+        GetWindowRect(window, out rectangle);
         return new Control { Handle = window, Text = text.ToString(), ClassName = className.ToString(),
-            Id = GetDlgCtrlID(window), Enabled = IsWindowEnabled(window) };
+            Id = GetDlgCtrlID(window), Enabled = IsWindowEnabled(window), Top = rectangle.Top };
     }
     public static Control[] Dialogs()
     {

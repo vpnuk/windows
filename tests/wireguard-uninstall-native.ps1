@@ -16,10 +16,10 @@ if (-not (Test-Path -LiteralPath $appExe)) { throw 'VPNUK must be installed befo
 function Invoke-PackagedUninstall([bool]$RemoveWireGuard) {
     $uninstallers = @(Get-ChildItem -LiteralPath ([IO.Path]::GetDirectoryName($appExe)) -Filter '*uninstall*.exe')
     if ($uninstallers.Count -ne 1) { throw 'Expected one packaged VPNUK uninstaller.' }
-    $message = "Starting real interactive packaged uninstall; checkbox removal = $RemoveWireGuard"
+    $message = "Starting real interactive packaged uninstall; radio removal = $RemoveWireGuard"
     Write-Host $message
     Add-Content -LiteralPath (Join-Path $temporary 'packaged-test.log') -Value $message
-    Invoke-CheckboxUninstall $uninstallers[0].FullName $appExe $RemoveWireGuard (Join-Path $temporary 'packaged-test.log')
+    Invoke-RadioUninstall $uninstallers[0].FullName $appExe $RemoveWireGuard (Join-Path $temporary 'packaged-test.log')
 }
 function New-TestKey {
     $bytes = New-Object byte[] 32
@@ -74,7 +74,7 @@ Endpoint = 127.0.0.1:9
         throw 'Packaged cleanup did not report verified completion.'
     }
     if ($logText -notmatch 'WireGuard removal selection=1' -or $logText -notmatch 'Beginning cleanup mode RemoveWireGuard') {
-        throw 'Actual checkbox selection did not reach the full WireGuard removal worker.'
+        throw 'Actual radio selection did not reach the full WireGuard removal worker.'
     }
     Write-Host 'PASS packaged optional WireGuard MSI uninstall, active-tunnel stop and adapter/software absence verification'
 } catch {

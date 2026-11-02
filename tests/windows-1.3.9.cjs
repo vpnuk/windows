@@ -547,16 +547,21 @@ test('WireGuard removal is optional, upgrade-guarded, and dispatched from the co
     assert(init.includes('${IfNot} ${isUpdated}'));
     assert(init.includes('${If} ${Silent}'));
     assert(init.includes('${GetOptions} $R0 "/REMOVEWIREGUARD" $R1'));
-    assert(page.includes('${NSD_Uncheck} $wgRemovalCheckbox'));
+    assert(page.includes('${NSD_Check} $wgRemovalNo'));
+    assert(page.includes('${NSD_CreateRadioButton} 12u 52u 100% 12u "Yes"'));
+    assert(page.includes('${NSD_CreateRadioButton} 12u 64u 100% 12u "No"'));
+    assert(page.includes('${NSD_AddStyle} $wgRemovalYes ${WS_GROUP}'));
+    assert(!page.includes('${NSD_CreateCheckbox}'));
     assert(page.includes('"Uninstall WireGuard"'));
     assert(!page.includes('Removes WireGuard for all apps'));
-    assert(page.includes('${NSD_OnClick} $wgRemovalCheckbox un.wgRemovalClick'));
+    assert(page.includes('${NSD_OnClick} $wgRemovalYes un.wgRemovalClick'));
+    assert(page.includes('${NSD_OnClick} $wgRemovalNo un.wgRemovalClick'));
     assert(!page.includes('StrCpy $wgRemovalFlag "0"'), 'page recreation must not erase the saved selection');
-    assert(leave.indexOf('${NSD_GetState} $wgRemovalCheckbox $wgRemovalFlag') <
+    assert(leave.indexOf('${NSD_GetState} $wgRemovalYes $wgRemovalFlag') <
         leave.indexOf('runWireGuardCleanup "RemoveWireGuard"'));
     assert(leave.includes('runWireGuardCleanup "RemoveWireGuard"'),
         'electron-builder shows extras after INSTFILES; interactive removal must run on page leave');
-    assert(leave.includes('${NSD_GetState} $wgRemovalCheckbox $wgRemovalFlag'));
+    assert(leave.includes('${NSD_GetState} $wgRemovalYes $wgRemovalFlag'));
     assert(hook.includes('${IfNot} ${isUpdated}'));
     assert(hook.includes('${If} $wgRemovalFlag == "1"'));
     assert(hook.includes('WireGuard removal selection=$wgRemovalFlag'));
@@ -568,19 +573,25 @@ test('WireGuard removal is optional, upgrade-guarded, and dispatched from the co
     const installPage = nsis.match(/Function wgPageLeave[\s\S]*?FunctionEnd/)[0];
     assert(!installPage.includes('uninstallWg'), 'dependency updates must use MSI upgrade, not pre-uninstall');
     assert(installPage.includes('wireguard-install.ps1'));
+    assert(installPage.includes('${NSD_SetText} $wgInstallStatus "Installing WireGuard...'));
+    assert(installPage.indexOf('user32::UpdateWindow(p $wgInstallStatus)') <
+        installPage.indexOf('nsExec::ExecToStack'),
+        'visible install status must repaint before the quiet worker blocks page leave');
+    assert(installPage.includes('${NSD_SetText} $wgInstallStatus ""'),
+        'failure and completion must clear stale installation status');
     assert(!installPage.includes('wgInstaller.exe" /quiet'), 'bootstrapper does not support no-launch MSI properties');
     assert(!installPage.includes('taskkill /F /IM wireguard.exe'), 'never kill every native tunnel to close the tray UI');
 });
-test('packaged removal tests click the real checkbox instead of bypassing it with a switch', () => {
+test('packaged removal tests click the real Yes/No radios instead of bypassing them with a switch', () => {
     const native = fs.readFileSync(path.join(root, 'tests/wireguard-uninstall-native.ps1'), 'utf8');
     const ui = fs.readFileSync(path.join(root, 'tests/wireguard-uninstall-dialog.ps1'), 'utf8');
-    assert(native.includes('Invoke-CheckboxUninstall'));
+    assert(native.includes('Invoke-RadioUninstall'));
     assert(!native.includes("$arguments += '/REMOVEWIREGUARD'"));
-    assert(ui.includes('WireGuard removal must be unchecked by default.'));
-    assert(ui.includes('[VpnukUninstallDialog]::Click($checkbox[0].Handle)'));
-    assert(ui.includes('if ($checkbox.Count -eq 1 -and -not $selectionConfirmed)'),
-        'a confirmed checkbox must not be polled while the page-leave callback is busy');
-    assert(ui.includes('Actual checkbox state did not match'));
+    assert(ui.includes('WireGuard removal must default to No.'));
+    assert(ui.includes('[VpnukUninstallDialog]::Click($yes[0].Handle)'));
+    assert(ui.includes('$nextHeading.Count -eq 1 -and -not $selectionConfirmed)'),
+        'confirmed radio buttons must not be polled while the page-leave callback is busy');
+    assert(ui.includes('Actual radio state did not match'));
     assert(native.includes("Beginning cleanup mode RemoveWireGuard"));
 });
 test('both WireGuard install entry points use the shared quiet MSI helper', () => {

@@ -57,7 +57,8 @@ connection logs, configuration tools and Live Help.
   presenting every completed process as a successful install.
 
 ### Optional WireGuard removal
-- Uninstall offers a simple unchecked **Uninstall WireGuard** checkbox.
+- Uninstall offers **Uninstall WireGuard** with Yes/No radio buttons matching OpenVPN; **No** is selected by default.
+- Setup shows **Installing WireGuard...** while downloading, verifying and installing the silent dependency. The standalone WireGuard app is not opened.
 - Leaving it unchecked preserves shared WireGuard software and unrelated tunnels.
 - Selecting it removes shared WireGuard software, its tunnels and verified
   WireGuard adapters. **Export standalone configurations before selecting it.**

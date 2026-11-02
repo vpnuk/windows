@@ -266,6 +266,7 @@ vpnuk_identity_saved:
     Var wgHwnd
     Var wgRadioValue
     Var wgHeight
+    Var wgInstallStatus
 
     Function ovpnPageCreate
         ${If} ${Silent}
@@ -494,6 +495,8 @@ vpnuk_identity_saved:
         StrCpy $wgRadioValue "false"
     wg_use_end:
 
+        ${NSD_CreateLabel} 0u 60u 100% 36u ""
+        Pop $wgInstallStatus
         nsDialogs::Show
     FunctionEnd
 
@@ -510,6 +513,14 @@ vpnuk_identity_saved:
         ${ElseIf} $wgRadioValue == true
             GetDlgItem $0 $hWndParent 1
             EnableWindow $0 0
+            GetDlgItem $0 $hWndParent 3
+            EnableWindow $0 0
+            GetDlgItem $0 $hWndParent 2
+            EnableWindow $0 0
+            ${NSD_SetText} $wgInstallStatus "Installing WireGuard...$\r$\nPlease wait while setup downloads, verifies and installs WireGuard."
+            !insertmacro MUI_HEADER_TEXT "WireGuard" "Installing WireGuard — please wait"
+            System::Call 'user32::UpdateWindow(p $wgInstallStatus)'
+            System::Call 'user32::UpdateWindow(p $hWndParent)'
 
             ; Official MSI, quiet and DO_NOT_LAUNCH. Never execute a stale
             ; bootstrap EXE or pre-uninstall shared software/configurations.
@@ -523,7 +534,12 @@ vpnuk_identity_saved:
             nsExec::ExecToStack /TIMEOUT=480000 '"$R6" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\wireguard-install.ps1"'
             Pop $0
             Pop $1
+            ${NSD_SetText} $wgInstallStatus ""
             GetDlgItem $R6 $hWndParent 1
+            EnableWindow $R6 1
+            GetDlgItem $R6 $hWndParent 3
+            EnableWindow $R6 1
+            GetDlgItem $R6 $hWndParent 2
             EnableWindow $R6 1
             ${If} $0 == 3010
                 SetRebootFlag true
@@ -583,7 +599,8 @@ FunctionEnd
     Var hwnd
     Var ovpnFlag
     Var userDataFlag
-    Var wgRemovalCheckbox
+    Var wgRemovalYes
+    Var wgRemovalNo
 
     Function un.OvpnPageCreate
         ${If} ${isUpdated}
@@ -623,27 +640,32 @@ FunctionEnd
         ${EndIf}
 
     ; ------------- Optional shared WireGuard removal -------------
-        ${NSD_CreateCheckbox} 0u 40u 100% 12u "Uninstall WireGuard"
-        Pop $wgRemovalCheckbox
-        ${NSD_AddStyle} $wgRemovalCheckbox ${WS_GROUP}
-        ${NSD_OnClick} $wgRemovalCheckbox un.wgRemovalClick
+        ${NSD_CreateLabel} 0u 40u 100% 12u "Uninstall WireGuard"
+        Pop $hwnd
+        ${NSD_CreateRadioButton} 12u 52u 100% 12u "Yes"
+        Pop $wgRemovalYes
+        ${NSD_AddStyle} $wgRemovalYes ${WS_GROUP}
+        ${NSD_OnClick} $wgRemovalYes un.wgRemovalClick
+        ${NSD_CreateRadioButton} 12u 64u 100% 12u "No"
+        Pop $wgRemovalNo
+        ${NSD_OnClick} $wgRemovalNo un.wgRemovalClick
         ${If} $wgRemovalFlag == "1"
-            ${NSD_Check} $wgRemovalCheckbox
+            ${NSD_Check} $wgRemovalYes
         ${Else}
-            ${NSD_Uncheck} $wgRemovalCheckbox
+            ${NSD_Check} $wgRemovalNo
         ${EndIf}
 
     ; ------------- User data -------------
-        ${NSD_CreateLabel} 0u 64u 100% 12u "Clear application user data"
+        ${NSD_CreateLabel} 0u 84u 100% 12u "Clear application user data"
         Pop $hwnd
 
-        ${NSD_CreateRadioButton} 12u 78u 100% 12u "Yes"
+        ${NSD_CreateRadioButton} 12u 96u 100% 12u "Yes"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "true"
         ${NSD_OnClick} $hwnd un.dataRadioClick
         ${NSD_AddStyle} $hwnd ${WS_GROUP}
 
-        ${NSD_CreateRadioButton} 12u 90u 100% 12u "No"
+        ${NSD_CreateRadioButton} 12u 108u 100% 12u "No"
         pop $hwnd
         nsDialogs::SetUserData $hwnd "false"
         ${NSD_OnClick} $hwnd un.dataRadioClick
@@ -667,11 +689,11 @@ FunctionEnd
 
     Function un.wgRemovalClick
         Pop $R0
-        ${NSD_GetState} $R0 $wgRemovalFlag
+        ${NSD_GetState} $wgRemovalYes $wgRemovalFlag
     FunctionEnd
 
     Function un.OvpnPageLeave
-        ${NSD_GetState} $wgRemovalCheckbox $wgRemovalFlag
+        ${NSD_GetState} $wgRemovalYes $wgRemovalFlag
         ${If} $ovpnFlag == ""
         ${OrIf} $userDataFlag == ""
             MessageBox MB_OK "Please specify your choice"
