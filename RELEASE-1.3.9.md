@@ -1,112 +1,215 @@
-# VPNUK for Windows 1.3.9
+# VPNUK for Windows
+## Version 1.3.9 — Features and Release Notes
 
-**Review draft — not approved for public release.**
+> **Owner review draft. Not yet publicly released.**
+> This document accompanies the private release candidate for testing and
+> wording review. Public publication requires the owner's separate approval.
 
-## Application functions
+VPNUK for Windows brings your VPN connections, saved profiles, server selection
+and connection settings together in one desktop application.
 
-VPNUK provides saved VPN connection profiles for OpenVPN, WireGuard and IKEv2.
-Profiles retain account credentials, server selection and protocol-specific
-settings. The app includes startup/auto-connect controls, a kill switch,
-connection logs, configuration tools and Live Help.
+Version **1.3.9** adds IP-based split tunnelling for OpenVPN and WireGuard,
+more reliable profile saving, refreshed WireGuard configuration management,
+detailed WireGuard diagnostics, ARM64 installer and OpenVPN scramble support, and improved dependency
+installation and removal.
 
-## Improvements in 1.3.9
+## What the app does
 
-### Split tunnelling
-- Destination IPv4 addresses and CIDR subnets can bypass OpenVPN or WireGuard.
-- Rules are saved separately for each profile.
-- The expandable **SPLIT TUNNELLING — BYPASS IP ADDRESSES** section has a
-  four-row input and a **Save Bypass Rules** button.
-- Bypass destinations also bypass the kill switch.
-- WireGuard's existing Allowed IPs setting remains separate.
-- App selection, domain rules and IPv6 bypass are not included.
+### VPN connections
 
-### Reliable saved profiles
-- **Save Profile** explicitly saves changes with success/error feedback.
-- Automatic persistence no longer depends on a clean disconnect or closing
-  the application normally.
-- Profile dropdowns highlight the selected profile rather than every entry.
+- Connect using **OpenVPN, WireGuard or IKEv2** with your VPNUK account.
+- Select a server and save its settings in a named connection profile.
+- Connect and disconnect from the main screen, with connection status and
+  progress messages.
+- Use OpenVPN over **TCP or UDP**, with protocol-specific port choices.
+- Use OpenVPN obfuscation where the required components are available.
+- Configure WireGuard's **Allowed IPs** separately from split-tunnelling bypass
+  rules.
 
-### WireGuard connection lifecycle
-- A fresh configuration and keys are generated on each connection.
-- Previous server configurations are reclaimed using this device's identity;
-  other devices' configurations must not be deleted.
-- Disconnect stops the tunnel before deleting its local configuration and
-  releases its server-side configuration.
-- If remote cleanup is unavailable, credential-free recovery information is
-  retained so cleanup can be retried. Offline cleanup is not reported complete.
-- Startup and external-uninstall handling identify VPNUK-owned tunnels by their
-  configuration directory; unrelated tunnels are not swept up.
+### Saved profiles
 
-### Detailed troubleshooting logs
-- The app's Log tab includes native WireGuard tunnel/adapter diagnostics,
-  including failures before a tunnel reaches its running state.
-- Sensitive keys are redacted; unrelated tunnels' entries are excluded.
-- Adapter startup errors are distinguished from credential errors.
+- Create, name, select and delete profiles.
+- Keep credentials, server selection and connection settings with each profile.
+- Maintain separate profiles for different servers, accounts and VPN protocols.
+- Use **Save Profile** to save changes explicitly.
 
-### Quiet WireGuard installation and updates
-- Use the official, native-architecture WireGuard MSI rather than launching
-  the bootstrap EXE with unsupported quiet/no-launch expectations.
-- Verify its BLAKE2b-256 manifest checksum and Authenticode WireGuard publisher before installing.
-- Install without MSI windows or an automatic restart; do not launch the
-  standalone WireGuard app afterward.
-- Close the existing WireGuard manager before installation and leave it closed
-  after installation or repair.
-- Require users to disconnect active WireGuard tunnels first; do not force-kill
-  tunnel processes or remove standalone configurations during an update.
-- Report installation failures and restart-required results rather than
-  presenting every completed process as a successful install.
+### Connection settings
 
-### Optional WireGuard removal
-- Uninstall offers **Uninstall WireGuard** with Yes/No radio buttons matching OpenVPN; **No** is selected by default.
-- Setup shows **Installing WireGuard...** while downloading, verifying and installing the silent dependency. The standalone WireGuard app is not opened.
-- Leaving it unchecked preserves shared WireGuard software and unrelated tunnels.
-- Selecting it removes shared WireGuard software, its tunnels and verified
-  WireGuard adapters. **Export standalone configurations before selecting it.**
-- Ordinary VPNUK upgrades do not select shared-software removal.
-- Cleanup verifies results and distinguishes failures or restart-required
-  removal from completed removal.
-- Pending remote peer cleanup retains recovery information.
+- **Launch at Startup:** start VPNUK with Windows.
+- **Auto-Connect:** connect automatically when the app launches.
+- **Kill Switch:** enable traffic-blocking protection if the VPN disconnects.
+- Choose DNS and MTU settings where supported by the selected connection.
+- Use profile-specific IP bypass rules with OpenVPN and WireGuard.
 
-### ARM64 installation
-- Detect native ARM64 Windows, including an emulated app process.
-- Select the ARM64 OpenVPN MSI from versions.json rather than x64/x86 drivers.
-- Do not silently substitute an incompatible driver when ARM downloads are absent.
-- Obfuscation is unavailable on ARM because no ARM patch is supplied.
-- Physical ARM64 testing has not been performed.
+Available settings depend on the VPN protocol and installed components.
+Destinations explicitly added to split tunnelling bypass both the VPN and
+the kill switch.
 
-## Private test build
+### Configuration, updates and support
 
-This candidate is unsigned. It does not use eSigner, is not a public release,
-and is intended for manual installation, not the signed automatic updater.
-Windows may display publisher/security warnings.
+- Access connection configuration tools and logs from the settings screen.
+- View native WireGuard tunnel and adapter diagnostics in the **Log** tab.
+- Access **Live Help** from within the app.
+- Check for application updates and show download progress and a
+  **Restart Now** prompt when an update is ready to install.
+- Install required VPN components through VPNUK Setup.
 
-### Full functionality checklist
-- Create and save profiles for each protocol; switch between profiles.
-- Change a setting, exit/relaunch and confirm it persists. Test forced-exit
-  persistence on a disposable test setup, not during important work.
-- Connect/disconnect OpenVPN and WireGuard; test a fresh WireGuard reconnect.
-- Confirm WireGuard local/server config cleanup and no accumulating config slots.
-- Test split tunnelling for both protocols, including with the kill switch.
-- Check native WireGuard diagnostics in the Log tab.
-- Check startup, auto-connect, DNS/MTU and existing protocol controls.
-- Install WireGuard on a clean setup and confirm it does not open afterward.
-- With the WireGuard manager open but tunnels disconnected, select installation/
-  update in VPNUK Setup and confirm the manager closes and remains closed.
-- An active WireGuard tunnel must block dependency installation with a request
-  to disconnect first, not be forcibly killed.
-- On a disposable Windows setup, uninstall with WireGuard removal unchecked:
-  shared WireGuard and an unrelated tunnel must remain.
-- Reinstall, export any standalone configurations, then uninstall with removal
-  checked: WireGuard software and its adapters must be removed, or a specific
-  failure/restart-required result must be shown.
-- Offline server cleanup must remain recoverable after reinstall.
+## What's new in version 1.3.9
 
-Automated tests supplement this checklist; they do not prove every real-world
-network connection or interactive installer path. The signed 1.3.8-to-1.3.9
-automatic update must be checked with the final signed candidate. Existing
-signature/publisher protection is not disabled for unsigned testing.
+### 1. Split tunnelling for OpenVPN and WireGuard
 
-## Publication approval
+Choose specific destination **IPv4 addresses or CIDR subnets** that should use
+your normal internet connection instead of the VPN.
 
-The owner reviews this overview and completes unsigned testing before approving
-paid signing. Public publication requires explicit owner approval.
+- Available separately for each OpenVPN or WireGuard profile.
+- Open **SPLIT TUNNELLING — BYPASS IP ADDRESSES** in the Connection settings.
+- Enter comma-separated IP addresses or subnets, then select
+  **Save Bypass Rules**.
+- The section expands when needed, keeping the Connection screen compact.
+- WireGuard's existing **Allowed IPs** setting remains separate.
+
+Example:
+
+```text
+192.168.1.10, 10.0.0.0/8
+```
+
+**Important:** saved bypass destinations also bypass the kill switch. This
+release supports destination IPv4 addresses and subnets, not domain names,
+application selection or IPv6 bypass rules.
+
+### 2. More reliable profile saving
+
+Profile persistence no longer depends on disconnecting or closing the app
+normally.
+
+- Added a dedicated **Save Profile** button.
+- Profile changes are also saved automatically.
+- Saving provides success or error feedback rather than reporting success
+  when the write fails.
+- Improved persistence when the app exits unexpectedly or Windows shuts down.
+- Corrected profile dropdown styling so the selected entry is highlighted,
+  rather than the entire list.
+
+### 3. Fresh WireGuard configurations and improved cleanup
+
+WireGuard now requests a fresh configuration and keys for each connection.
+
+- Stops the tunnel before removing its local configuration on disconnect.
+- Releases the associated server-side configuration when the server is
+  reachable.
+- Reclaims previous configurations associated with this device when preparing
+  a new connection.
+- Identifies VPNUK-owned tunnels by their configuration location, rather than
+  deleting unrelated tunnels based only on a matching name.
+- Improves handling of externally removed WireGuard services.
+
+If server-side cleanup cannot finish, recovery information is retained so
+cleanup can be retried. An unavailable server is not reported as a successful
+remote deletion.
+
+### 4. Detailed WireGuard troubleshooting logs
+
+The app's **Log** tab now includes native WireGuard diagnostics, not just
+VPNUK's connection progress messages.
+
+- Includes tunnel-service and network-adapter startup diagnostics.
+- Captures errors even when a tunnel fails before reaching its running state.
+- Distinguishes adapter and service failures from account-credential errors.
+- Redacts sensitive keys and excludes unrelated tunnels' log entries.
+
+This makes connection failures easier to investigate without finding
+WireGuard's diagnostic log separately.
+
+### 5. Improved WireGuard installation and updates
+
+WireGuard installation runs quietly while VPNUK Setup displays
+**Installing WireGuard...**
+
+- Downloads the official MSI for the native Windows architecture.
+- Verifies the published checksum and WireGuard publisher signature before
+  installation.
+- Closes the existing WireGuard manager before installation or repair.
+- Does not automatically open the standalone WireGuard application afterward.
+- Does not automatically restart Windows.
+- Reports installation errors and any restart requirement.
+
+Active WireGuard tunnels must be disconnected before installing or updating
+the dependency; VPNUK does not force-kill them to continue.
+
+### 6. Optional WireGuard removal during uninstall
+
+VPNUK's uninstaller now offers **Uninstall WireGuard** with **Yes/No radio
+buttons**, matching the OpenVPN removal controls.
+
+- **No** is selected by default and preserves the shared WireGuard installation.
+- **Yes** stops WireGuard tunnels and removes its software, services and
+  identified WireGuard adapters.
+- Removal checks the final result and reports failures or a required restart
+  instead of claiming that incomplete removal succeeded.
+- Ordinary VPNUK upgrades preserve the shared WireGuard installation.
+- OpenVPN removal and clearing VPNUK application data remain separate choices.
+
+**Important:** WireGuard is shared software. Choosing **Yes** can affect tunnels
+used outside VPNUK. Export any standalone configurations you wish to keep before
+removing it.
+
+### 7. ARM64-aware installation
+
+The installer now recognises native **ARM64 Windows**, including when an app
+process is running under emulation.
+
+- Selects the ARM64 OpenVPN installer rather than an x86 or x64 driver package.
+- Uses native architecture when selecting the WireGuard MSI.
+- Does not silently substitute an incompatible OpenVPN driver when an ARM64
+  download is unavailable.
+- Adds native ARM64 **OpenVPN obfuscation using scramble**, alongside the
+  existing x86 and x64 packages.
+- Checks the architecture of patched OpenVPN executables and supporting DLLs
+  before enabling Obfuscation.
+- Preserves a working patch installation if a replacement download fails.
+- Disables OpenVPN DCO for obfuscated connections so scramble processes traffic
+  in OpenVPN's userspace data path.
+
+The ARM64 scramble package includes the required Microsoft ARM64
+`vcruntime140.dll` alongside its OpenVPN and supporting libraries. Its download
+is listed in the live server manifest.
+
+Physical ARM64 hardware and live scramble connection testing have not been
+performed here; package architecture and dependency checks are not a substitute
+for those runtime tests.
+
+### 8. Interface improvements
+
+- Compact, expandable split-tunnelling settings.
+- Clearer split-tunnelling text and a four-row input area.
+- Removed the unwanted orange/beige mouse-click outline from the
+  split-tunnelling heading.
+- Consistent selected-item and hover styling in profile dropdowns.
+- Matching Yes/No controls for optional OpenVPN and WireGuard removal.
+- Visible installation status while WireGuard installs quietly.
+
+## Installation and updating
+
+- Use the official VPNUK Windows installer.
+- Administrator permission is required to install the app and VPN components.
+- Disconnect active VPN connections before installing an update.
+- Existing users can use the in-app update prompt when the signed public update
+  becomes available, or install the official update manually.
+- A Windows restart may be required after VPN component installation or removal.
+- WireGuard requires Windows 10 or later.
+
+Private unsigned test installers are not intended for the signed automatic
+updater and are not the public release.
+
+## Help and support
+
+Use the **Live Help** tab in the app or visit
+[vpnuk.net](https://www.vpnuk.net/).
+
+For connection problems, include the app version, selected VPN protocol and
+relevant Log tab output. Do not share passwords or private keys.
+
+---
+
+WireGuard and the WireGuard logo are registered trademarks of Jason A. Donenfeld.

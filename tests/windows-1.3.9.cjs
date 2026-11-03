@@ -383,6 +383,108 @@ test('native OpenVPN detection reads PE machine type rather than trusting the in
         assert.equal(arch.executableArch(file), expected);
     }
 });
+function fakePe(machine) {
+    const data = Buffer.alloc(128);
+    data.writeUInt16LE(0x5a4d, 0);
+    data.writeUInt32LE(80, 0x3c);
+    data.write('PE\u0000\u0000', 80, 'ascii');
+    data.writeUInt16LE(machine, 84);
+    return data;
+}
+function patchFixture() {
+    class Zip {
+        constructor(data) {
+            this.entries = JSON.parse(data.toString()).map(entry => ({ ...entry, entryName: entry.name }));
+        }
+        getEntries() { return this.entries; }
+        extractAllTo(folder) {
+            for (const entry of this.entries) {
+                const target = path.join(folder, entry.entryName);
+                fs.mkdirSync(path.dirname(target), { recursive: true });
+                fs.writeFileSync(target, Buffer.from(entry.data, 'base64'));
+            }
+        }
+    }
+    return load('app/modules/ovpn-obfuscation.js', { 'adm-zip': Zip });
+}
+function patchZip(entries) {
+    return Buffer.from(JSON.stringify(entries.map(([name, machine]) =>
+        ({ name, data: fakePe(machine).toString('base64') }))));
+}
+test('scramble packages install the existing bin layout for ARM64, x64 and x86', () => {
+    const helper = patchFixture();
+    for (const [machine, native] of [[0xaa64, 'arm64'], [0x8664, 'x64'], [0x14c, 'ia32']]) {
+        const folder = path.join(temp(), 'ovpnBin');
+        assert(helper.installPatchZip(patchZip([['bin/openvpn.exe', machine], ['bin/libssl.dll', machine]]), folder, native));
+        assert(helper.patchAvailable(folder, native));
+        assert.equal(helper.patchExecutable(folder, native), path.join(folder, 'bin/openvpn.exe'));
+        assert(!helper.patchAvailable(folder, native === 'arm64' ? 'x64' : 'arm64'));
+    }
+});
+test('Windows-created ARM64 ZIPs normalize backslash paths before extraction', () => {
+    const helper = patchFixture();
+    const folder = path.join(temp(), 'ovpnBin');
+    helper.installPatchZip(patchZip([['bin\\openvpn.exe', 0xaa64], ['bin\\libssl-3-arm64.dll', 0xaa64]]), folder, 'arm64');
+    assert(helper.patchAvailable(folder, 'arm64'));
+    assert(fs.existsSync(path.join(folder, 'bin/libssl-3-arm64.dll')));
+});
+test('scramble update rejects wrong architecture, bad DLLs and invalid ZIPs without deleting the good installation', () => {
+    const helper = patchFixture();
+    const folder = path.join(temp(), 'ovpnBin');
+    helper.installPatchZip(patchZip([['bin/openvpn.exe', 0xaa64]]), folder, 'arm64');
+    const original = fs.readFileSync(path.join(folder, 'bin/openvpn.exe'));
+    for (const bad of [
+        patchZip([['bin/openvpn.exe', 0x8664]]),
+        patchZip([['bin/openvpn.exe', 0xaa64], ['bin/libssl.dll', 0x8664]]),
+        patchZip([['openvpn.exe', 0xaa64]]),
+        patchZip([['bin/../outside.exe', 0xaa64]]),
+        patchZip([['bin/.. /outside.exe', 0xaa64]]),
+        Buffer.from('not a ZIP'),
+    ]) {
+        assert.throws(() => helper.installPatchZip(bad, folder, 'arm64'));
+        assert.deepEqual(fs.readFileSync(path.join(folder, 'bin/openvpn.exe')), original);
+    }
+});
+test('missing scramble binaries fail explicitly instead of falling back to stock OpenVPN', () => {
+    const helper = patchFixture();
+    assert(!helper.patchAvailable(temp(), 'arm64'));
+    assert.throws(() => helper.patchExecutable(temp(), 'arm64'), /compatible arm64/);
+    const source = fs.readFileSync(path.join(root, 'app/main/vpn/OpenVpn.js'), 'utf8');
+    assert(source.includes('patchExecutable(settingsPath.ovpnBinFolder)'));
+    assert(!source.includes('obfuscation is not available for ARM64'));
+    assert(source.includes("...(this.#obfuscate ? ['--disable-dco'] : [])"));
+});
+test('scramble downloader preserves working packages on failure and detects newly added ARM URLs', async () => {
+    const folder = path.join(temp(), 'patch');
+    let installed = 0;
+    let downloads = 0;
+    const fixture = load('app/modules/catalogs.js', {
+        axios: { get: async () => { downloads++; throw new Error('download offline'); } },
+        './constants': { settingsPath: { ovpnBinFolder: folder }, settingsLink: {} },
+        './windows-arch': { windowsArch: () => 'arm64', downloadForArch: links => arch.downloadForArch(links, 'arm64') },
+        './ovpn-obfuscation': { patchAvailable: () => false, installPatchZip: () => { installed++; } },
+    });
+    assert.equal(await fixture.downloadPatchedOvpnExe({ win64: 'https://example.test/x64.zip' }), false);
+    assert.equal(downloads, 0);
+    assert.equal(await fixture.downloadPatchedOvpnExe({ arm64: 'https://example.test/arm64.zip' }), false);
+    assert.equal(downloads, 1);
+    assert.equal(installed, 0);
+    const source = fs.readFileSync(path.join(root, 'app/modules/catalogs.js'), 'utf8');
+    assert(source.includes('oldPatchLink !== newPatchLink'));
+    assert(!source.includes('fs.rmdirSync(settingsPath.ovpnBinFolder'));
+});
+test('ARM64 scramble workflow is manual, pinned, unsigned and artifact-only', () => {
+    const workflow = fs.readFileSync(path.join(root, '.github/workflows/openvpn-scramble-arm64.yml'), 'utf8');
+    const script = fs.readFileSync(path.join(root, 'scripts/build-openvpn-scramble-arm64.ps1'), 'utf8');
+    assert(workflow.includes('workflow_dispatch:') && !workflow.includes('  push:'));
+    assert(!/secrets\.|sign\.js|gh release|CodeSignTool/.test(workflow));
+    assert(workflow.includes('contents: read'));
+    assert(script.includes("'openvpn-2612-arm64.zip'"));
+    assert(script.includes("'NotSigned'"));
+    assert(script.includes('runtimeTested = $false'));
+    assert(script.includes('Assert-Arm64 $file.FullName'));
+    assert(script.includes("'bin/openvpn.exe'"));
+});
 test('bypass input is normalized and rejects invalid addresses and shell fragments', () => {
     assert.deepEqual(bypass.bypassPrefixes('192.168.1.7\n10.7.4.3/8,192.168.1.7'), ['192.168.1.7/32', '10.0.0.0/8']);
     for (const invalid of ['256.1.1.1', '1.2.3.4/33', 'example.com', '::1', '1.2.3.4 & calc.exe']) {

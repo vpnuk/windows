@@ -2,8 +2,8 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 const { settingsPath, settingsLink } = require('./constants');
-const AdmZip = require('adm-zip');
 const { windowsArch, downloadForArch } = require('./windows-arch');
+const { patchAvailable, installPatchZip } = require('./ovpn-obfuscation');
 
 const dowloadOvpnConfig = (link, filePath) =>
     axios
@@ -30,37 +30,20 @@ const dowloadJson = (link, filePath) =>
             filePath, JSON.stringify(response.data, undefined, 2)))
         .catch(error => console.log('error', error));
 
-const downloadPatchedOvpnExe = links => {
-    // No obfuscation patch available for arm64 yet — skip silently.
-    // arm64 Windows can still use standard OpenVPN (no obfuscation mode).
+const downloadPatchedOvpnExe = async links => {
+    // Missing optional ARM patch must not prevent ordinary VPN use.
     if (windowsArch() === 'arm64' && !(links && (links.arm64 || links.win_arm64))) {
         return Promise.resolve(false);
     }
-    let link = getLinkByArch(links);
-    if (fs.existsSync(settingsPath.ovpnBinFolder)) {
-        fs.rmdirSync(settingsPath.ovpnBinFolder, { recursive: true });
+    try {
+        const link = getLinkByArch(links);
+        const response = await axios.get(link, { responseType: 'arraybuffer' });
+        return installPatchZip(response.data, settingsPath.ovpnBinFolder);
+    } catch (error) {
+        // Failed download or validation must preserve the previous good patch.
+        console.error('OpenVPN scramble package update failed:', error.message);
+        return false;
     }
-    const zipFile = path.join(require('os').tmpdir(), '\\', path.basename(link));
-    return axios
-        .get(link, { responseType: 'arraybuffer' })
-        .then(response => fs.writeFileSync(zipFile, new Buffer.from(response.data)))
-        .catch(error => console.log('error', error))
-        .then(() => {
-            let success = false;
-            try {
-                let zip = new AdmZip(zipFile);
-                fs.mkdirSync(settingsPath.ovpnBinFolder, { recursive: true });
-                zip.extractAllTo(settingsPath.ovpnBinFolder, true);
-                success = true;
-            } catch (error) {
-                console.log('error', error)
-            } finally {
-                if (fs.existsSync(zipFile)) {
-                    fs.unlinkSync(zipFile);
-                }
-            }
-            return success;
-        });
 };
 exports.downloadPatchedOvpnExe = downloadPatchedOvpnExe;
 
@@ -102,7 +85,7 @@ const handlerServerTypesStructure = (arr, types) =>
             }))
     })));
 
-const isObfuscateAvailable = () => fs.existsSync(settingsPath.ovpnBinExe);
+const isObfuscateAvailable = () => patchAvailable(settingsPath.ovpnBinFolder);
 exports.isObfuscateAvailable = isObfuscateAvailable;
 
 const getVersions = file => fs.existsSync(file)
@@ -155,7 +138,12 @@ function initializeCatalogs() {
                 downloads.push(downloadFile(newVers.ikev2.cert, settingsPath.ikev2Cert));
                 ikev2Cert = true;
             }
-            if (!oldVers || !fs.existsSync(settingsPath.ovpnBinExe)) {
+            const patchKey = { arm64: 'arm64', x64: 'win64', ia32: 'win32' }[windowsArch()];
+            const oldPatchLink = oldVers?.openvpn?.patch?.[patchKey] ||
+                (patchKey === 'arm64' && oldVers?.openvpn?.patch?.win_arm64);
+            const newPatchLink = newVers.openvpn.patch?.[patchKey] ||
+                (patchKey === 'arm64' && newVers.openvpn.patch?.win_arm64);
+            if (!oldVers || !isObfuscateAvailable() || oldPatchLink !== newPatchLink) {
                 downloads.push(downloadPatchedOvpnExe(newVers.openvpn.patch));
             }
 

@@ -5,19 +5,18 @@ const { spawnChild } = require('../utils/async');
 const { escapeSpaces } = require('../utils/cmd');
 const VpnBase = require('./VpnBase');
 const { windowsArch, executableArch } = require('../../modules/windows-arch');
+const { patchExecutable } = require('../../modules/ovpn-obfuscation');
 
 const isDev = process.env.ELECTRON_ENV === 'Dev';
 
 const getOpenVpnExePathSync = (obfuscate = false) => {
-    if (obfuscate && windowsArch() === 'arm64') {
-        throw new Error('OpenVPN obfuscation is not available for ARM64. Select TCP or UDP instead.');
-    }
     if (process.env.OVPN_EXT_PATH && isDev) {
         return escapeSpaces(process.env.OVPN_EXT_PATH);
     }
 
-    if (obfuscate && fs.existsSync(settingsPath.ovpnBinExe)) {
-        return escapeSpaces(settingsPath.ovpnBinExe);
+    if (obfuscate) {
+        // Never silently fall back to stock OpenVPN without scramble support.
+        return escapeSpaces(patchExecutable(settingsPath.ovpnBinFolder));
     }
 
     let exeKey = '' + cp
@@ -133,6 +132,7 @@ class OpenVpn extends VpnBase {
         let proc = cp.execFile(
             getOpenVpnExePathSync(this.#obfuscate),
             [
+                ...(this.#obfuscate ? ['--disable-dco'] : []),
                 `--config\ ${this.#obfuscate
                     ? escapeSpaces(settingsPath.ovpnObfucation)
                     : escapeSpaces(settingsPath.ovpn)}`,

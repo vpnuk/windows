@@ -1,0 +1,43 @@
+name: Build unsigned OpenVPN 2.6.12 scramble ARM64 package
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.native-vcpkg
+      VCPKG_DISABLE_METRICS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: OpenVPN/openvpn
+          ref: 038a94bae57a446cc74be9c8386ee475246836f1
+          path: .native-openvpn
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 8d3649ba34aab36914ddd897958599aa0a91b08e
+          path: .native-vcpkg
+          persist-credentials: false
+      - name: Build and verify native package without signing
+        shell: pwsh
+        run: |
+          ./scripts/build-openvpn-scramble-arm64.ps1 `
+            -SourceDirectory "${{ github.workspace }}/.native-openvpn" `
+            -OutputDirectory "${{ runner.temp }}/vpnuk-openvpn-arm64"
+      - name: Upload private build artifact only
+        uses: actions/upload-artifact@v4
+        with:
+          name: openvpn-2612-arm64-unsigned
+          path: |
+            ${{ runner.temp }}/vpnuk-openvpn-arm64/openvpn-2612-arm64.zip
+            ${{ runner.temp }}/vpnuk-openvpn-arm64/build-manifest.json
+          if-no-files-found: error
+          retention-days: 14
