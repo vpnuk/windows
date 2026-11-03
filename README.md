@@ -1,34 +1,62 @@
-## VPNUK for Windows
+# VPNUK for Windows
 
-### What's New
+## Version 1.3.9
 
-#### WireGuard VPN Support
-VPNUK apps now supports the WireGuard protocol for all account types. WireGaurd is a modern, high-performance VPN protocol that is significantly faster than OpenVPN and IPSec. WireGuard provides:
-- Faster connection times
-- Better performance and lower latency
-- Improved battery efficiency
-- A simpler, more secure codebase
+Manage OpenVPN, WireGuard and IKEv2 connections, select servers and save named
+connection profiles using your VPNUK account.
 
-#### Smart Update Notifications
-The app now checks for mandatory updates on startup. If a critical update is available you will be notified with a clear prompt and a direct download link, ensuring you always have the latest security fixes and features.
+**[Download the signed Windows release](https://github.com/vpnuk/windows/releases/tag/v1.3.9)**
 
-#### Improved Auto-Update System
-- Auto-updates are now more resilient — certificate changes will no longer interrupt future update delivery
-- The update mechanism has been hardened to prevent the type of update issues some users experienced previously
+**[Read the full app overview and version 1.3.9 release notes](RELEASE-1.3.9.md)**
 
-### Bug Fixes & Improvements
-- Fixed an issue where the auto-updater could show an error for some users
-- General stability improvements
-- Improved error handling throughout the app
+### App features
 
-### Notes
-- This release requires a fresh install if you are upgrading from v1.2.x
-- WireGuard requires Windows 10 or later
-- Download the full installer (`VPNUK-Setup-1.3.6.exe`) for offline installation, or the web installer (`VPNUK-Web-Setup-1.3.6.exe`) for a smaller initial download
+- Saved profiles with account, server and protocol-specific connection settings.
+- OpenVPN TCP/UDP connections and scramble obfuscation.
+- WireGuard connections with separate Allowed IPs settings.
+- Launch at Startup, Auto-Connect, Kill Switch, and supported DNS/MTU settings.
+- Connection logs, native WireGuard diagnostics and in-app Live Help.
+- Signed application updates with download progress and a Restart Now prompt.
 
----
-For support visit [vpnuk.net](https://vpnuk.net) or email service@vpnuk.net
+### What's new in 1.3.9
+
+- **Split tunnelling:** per-profile IPv4 address/subnet bypass for OpenVPN and
+  WireGuard. Listed destinations bypass both the VPN and the Kill Switch.
+- **Profile saving:** an explicit Save Profile button and more reliable
+  persistence when the app or PC closes unexpectedly.
+- **ARM64 support:** native OpenVPN/WireGuard component selection and native
+  ARM64 OpenVPN scramble packages, alongside x64 and x86 support.
+- **Fresh WireGuard configs:** generate on connection and remove on disconnect,
+  with device-specific server cleanup and pending-cleanup recovery.
+- **Detailed WireGuard logs:** native tunnel and adapter diagnostics in the Log
+  tab, with sensitive key material filtered.
+- **Improved setup:** quiet WireGuard installation with visible progress status,
+  existing-install reuse and repair, without opening the standalone WireGuard UI.
+- **Optional component removal:** matching Yes/No choices for OpenVPN and
+  WireGuard removal, including WireGuard's tunnel services and adapters.
+- **User-data removal:** the uninstall choice now correctly removes saved app
+  data; preserving app data remains a separate option.
+- **Settings improvements:** expandable bypass settings, clearer text and
+  corrected profile-dropdown highlighting.
+
+### Installing and updating
+
+- Existing users can use the in-app updater or install the signed update manually.
+  The owner tested updating from version 1.3.8 to 1.3.9.
+- Choose **VPNUK-Setup-1.3.9-build371.exe** for the full application installer,
+  including x64, x86 and ARM64 application packages.
+- **VPNUK-Web-Setup-1.3.9-build371.exe** is the smaller x64 web installer and
+  downloads its application package during installation.
+- Administrator permission is required. Disconnect the VPN before updating.
+- Installing VPN components can require an internet connection and a Windows restart.
+- WireGuard requires Windows 10 or later.
+- Installers are signed by **ONLINE PRIVACY SERVICES LTD**.
+
+Physical ARM64 execution and a live ARM64 scramble connection have not been
+independently tested; package architecture and runtime dependencies were checked.
+See the full release notes for validation details and cleanup behaviour.
+
+For support, use Live Help in the app, visit [vpnuk.net](https://www.vpnuk.net/)
+or email service@vpnuk.net.
 
 "WireGuard" and the "WireGuard" logo are registered trademarks of Jason A. Donenfeld.
-
-<!-- ci-trigger: 2026-05-07T11:54:14Z -->

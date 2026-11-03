@@ -1,9 +1,9 @@
 # VPNUK for Windows
 ## Version 1.3.9 — Features and Release Notes
 
-> **Owner review draft. Not yet publicly released.**
-> This document accompanies the private release candidate for testing and
-> wording review. Public publication requires the owner's separate approval.
+> **Public release — version 1.3.9, signed build 371.**
+> Published with the owner's approval after private testing. These are the
+> same signed installer files used for the final test, without rebuilding.
 
 VPNUK for Windows brings your VPN connections, saved profiles, server selection
 and connection settings together in one desktop application.
@@ -212,7 +212,7 @@ selection has been made, rather than before that page is displayed.
 WireGuard removal, OpenVPN removal and application-data removal remain
 independent choices.
 
-## Release validation and private-candidate status
+## Release validation
 
 The owner has confirmed successful Windows testing of WireGuard connections,
 the update from **1.3.8 to 1.3.9**, optional WireGuard removal, existing and fresh
@@ -228,16 +228,16 @@ application-data preservation/removal across reinstall.
 These results do not claim physical ARM64 execution or a live scramble
 connection test. The ARM64 package and dependency checks are described above.
 
-This signed candidate remains a **private draft for one final owner test**.
-It must not be published until the owner gives separate approval.
+The owner approved this signed build for public release after final testing.
+The published installers are the same signed build 371 files tested privately.
 
 ## Installation and updating
 
 - Use the official VPNUK Windows installer.
 - Administrator permission is required to install the app and VPN components.
 - Disconnect active VPN connections before installing an update.
-- Existing users can use the in-app update prompt when the signed public update
-  becomes available, or install the official update manually.
+- Existing users can use the in-app update prompt for the signed public update,
+  or install the official update manually.
 - A Windows restart may be required after VPN component installation or removal.
 - WireGuard requires Windows 10 or later.
 
