@@ -634,8 +634,27 @@ test('silent and interactive uninstall run cleanup before removing application f
     assert(hook.indexOf('--cleanup-wireguard') < hook.indexOf('Delete "$APPDATA'));
     assert(hook.indexOf('--cleanup-wireguard') < hook.indexOf('RMDir /r "$INSTDIR"'));
     assert(!hook.includes('${Silent}'));
-    assert(!page.includes('RMDir /r "$APPDATA\\VPNUK"'));
+    assert(!hook.includes('RMDir /r "$APPDATA\\VPNUK"'),
+        'interactive data deletion must not run before the extras page asks the user');
+    assert(page.includes('${NSD_GetState} $userDataYes $R0'));
+    assert(page.indexOf('${NSD_GetState} $userDataYes $R0') < page.indexOf('RMDir /r "$APPDATA\\VPNUK"'));
+    assert(page.includes('${If} $userDataFlag == "true"'));
+    assert(page.includes('Application user data removal NOT COMPLETE'));
+    assert(!page.includes('RMDir /r "$LOCALAPPDATA\\VPNUK-WireGuard-Recovery"'),
+        'clear-data must retain credential-free pending server-cleanup recovery');
     assert(!hook.includes('password') && !hook.includes('credentials.login'));
+});
+test('packaged uninstall checks actual clear-data Yes and No controls and verifies reinstall outcomes', () => {
+    const native = fs.readFileSync(path.join(root, 'tests/wireguard-uninstall-native.ps1'), 'utf8');
+    const ui = fs.readFileSync(path.join(root, 'tests/wireguard-uninstall-dialog.ps1'), 'utf8');
+    assert(ui.includes('[VpnukUninstallDialog]::Click($dataYes[0].Handle)'));
+    assert(ui.includes('User-data removal must default to No.'));
+    assert(ui.includes('Actual user-data radio state did not match'));
+    assert(native.includes('Invoke-PackagedUninstall $false $false'));
+    assert(native.includes('Invoke-PackagedUninstall $true $true'));
+    assert(native.includes('User-data Yes selection left the application data folder behind.'));
+    assert(native.includes('User-data No selection deleted saved application data.'));
+    assert(native.includes('Reinstall after user-data Yes restored the old application data.'));
 });
 test('WireGuard removal is optional, upgrade-guarded, and dispatched from the correct uninstall stage', () => {
     const nsis = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');

@@ -13,13 +13,13 @@ $name = 'vpnuk-uninstall-check'
 $config = Join-Path $temporary ($name + '.conf')
 $appExe = 'C:\Program Files\VPNUK\VPNUK.exe'
 if (-not (Test-Path -LiteralPath $appExe)) { throw 'VPNUK must be installed before the packaged uninstall test.' }
-function Invoke-PackagedUninstall([bool]$RemoveWireGuard) {
+function Invoke-PackagedUninstall([bool]$RemoveWireGuard, [bool]$ClearUserData = $false) {
     $uninstallers = @(Get-ChildItem -LiteralPath ([IO.Path]::GetDirectoryName($appExe)) -Filter '*uninstall*.exe')
     if ($uninstallers.Count -ne 1) { throw 'Expected one packaged VPNUK uninstaller.' }
     $message = "Starting real interactive packaged uninstall; radio removal = $RemoveWireGuard"
     Write-Host $message
     Add-Content -LiteralPath (Join-Path $temporary 'packaged-test.log') -Value $message
-    Invoke-RadioUninstall $uninstallers[0].FullName $appExe $RemoveWireGuard (Join-Path $temporary 'packaged-test.log')
+    Invoke-RadioUninstall $uninstallers[0].FullName $appExe $RemoveWireGuard (Join-Path $temporary 'packaged-test.log') $ClearUserData
 }
 function New-TestKey {
     $bytes = New-Object byte[] 32
@@ -47,7 +47,12 @@ Endpoint = 127.0.0.1:9
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
     if (-not $devices.Count) { throw 'Native test did not create an identifiable WireGuard adapter.' }
-    Invoke-PackagedUninstall $false
+    $appData = Join-Path $env:APPDATA 'VPNUK'
+    New-Item -ItemType Directory -Path $appData -Force | Out-Null
+    $sentinel = Join-Path $appData 'user-data-uninstall-check.json'
+    [IO.File]::WriteAllText($sentinel, '{"synthetic":true}')
+    Invoke-PackagedUninstall $false $false
+    if (-not (Test-Path -LiteralPath $sentinel)) { throw 'User-data No selection deleted saved application data.' }
     if (-not (Test-Path -LiteralPath $exe) -or -not @(Get-WgProducts).Count -or -not @(Get-VerifiedWgDevices).Count) {
         throw 'Default VPNUK uninstall removed shared WireGuard or its unrelated adapter.'
     }
@@ -61,7 +66,13 @@ Endpoint = 127.0.0.1:9
 
     $code = Invoke-Native $PackagedInstaller @('/S') 480000
     if ($code -ne 0 -or -not (Test-Path -LiteralPath $appExe)) { throw "VPNUK reinstall failed: $code" }
-    Invoke-PackagedUninstall $true
+    if (-not (Test-Path -LiteralPath $sentinel)) { throw 'Reinstall after user-data No lost saved data.' }
+    $recoverySentinel = Join-Path $env:LOCALAPPDATA 'VPNUK-WireGuard-Recovery\user-data-clear-check.json'
+    [IO.File]::WriteAllText($recoverySentinel, '{"synthetic":true,"credentials":false}')
+    Invoke-PackagedUninstall $true $true
+    if (Test-Path -LiteralPath $appData) { throw 'User-data Yes selection left the application data folder behind.' }
+    if (-not (Test-Path -LiteralPath $recoverySentinel)) { throw 'User-data removal erased the separate pending-cleanup recovery folder.' }
+    Write-Host 'PASS actual user-data Yes/No radios delete or preserve application data as selected'
     if (@(Get-WgProducts).Count -or @(Get-WgServices).Count -or @(Get-VerifiedWgDevices).Count) {
         throw 'Packaged optional removal left WireGuard registration, services or adapters.'
     }
@@ -77,6 +88,11 @@ Endpoint = 127.0.0.1:9
         throw 'Actual radio selection did not reach the full WireGuard removal worker.'
     }
     Write-Host 'PASS packaged optional WireGuard MSI uninstall, active-tunnel stop and adapter/software absence verification'
+    $code = Invoke-Native $PackagedInstaller @('/S') 480000
+    if ($code -ne 0 -or (Test-Path -LiteralPath $sentinel)) {
+        throw 'Reinstall after user-data Yes restored the old application data.'
+    }
+    Write-Host 'PASS reinstall after clear user data does not restore removed application data'
 } catch {
     $_ | Out-String | Add-Content -LiteralPath (Join-Path $temporary 'packaged-test.log')
     # Record window titles, not command lines, environment variables or keys.

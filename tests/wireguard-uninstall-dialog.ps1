@@ -1,4 +1,4 @@
-function Invoke-RadioUninstall([string]$Uninstaller, [string]$AppExe, [bool]$RemoveWireGuard, [string]$TestLog) {
+function Invoke-RadioUninstall([string]$Uninstaller, [string]$AppExe, [bool]$RemoveWireGuard, [string]$TestLog, [bool]$ClearUserData = $false) {
     if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows') {
         throw 'Interactive destructive test is restricted to disposable GitHub-hosted Windows runners.'
     }
@@ -55,6 +55,30 @@ function Invoke-RadioUninstall([string]$Uninstaller, [string]$AppExe, [bool]$Rem
                         [VpnukUninstallDialog]::Checked($no[0].Handle) -ne (1 - $expected)) {
                         throw 'Actual radio state did not match the requested selection.'
                     }
+                    $dataOptions = @($controls | Where-Object {
+                        $_.ClassName -eq 'Button' -and $_.Top -gt $nextHeading[0].Top -and $_.Text -in @('Yes', 'No')
+                    })
+                    $dataYes = @($dataOptions | Where-Object { $_.Text -eq 'Yes' })
+                    $dataNo = @($dataOptions | Where-Object { $_.Text -eq 'No' })
+                    if ($dataYes.Count -ne 1 -or $dataNo.Count -ne 1) { throw 'User-data Yes/No choices were not found.' }
+                    if ([VpnukUninstallDialog]::Checked($dataYes[0].Handle) -ne 0 -or
+                        [VpnukUninstallDialog]::Checked($dataNo[0].Handle) -ne 1) {
+                        throw 'User-data removal must default to No.'
+                    }
+                    if ($ClearUserData) {
+                        [VpnukUninstallDialog]::Click($dataYes[0].Handle)
+                        $checkDeadline = (Get-Date).AddSeconds(3)
+                        while ([VpnukUninstallDialog]::Checked($dataYes[0].Handle) -ne 1 -and (Get-Date) -lt $checkDeadline) {
+                            Start-Sleep -Milliseconds 50
+                        }
+                    }
+                    $expectedData = 0
+                    if ($ClearUserData) { $expectedData = 1 }
+                    if ([VpnukUninstallDialog]::Checked($dataYes[0].Handle) -ne $expectedData -or
+                        [VpnukUninstallDialog]::Checked($dataNo[0].Handle) -ne (1 - $expectedData)) {
+                        throw 'Actual user-data radio state did not match the requested selection.'
+                    }
+                    Add-Content -LiteralPath $TestLog -Value "Confirmed clear user data=$ClearUserData"
                     $selectionConfirmed = $true
                 }
                 $primary = @($controls | Where-Object {

@@ -224,9 +224,8 @@ vpnuk_identity_saved:
     Delete "$APPDATA\VPNUK\shared.conf"
     Delete "$APPDATA\VPNUK\dedicated.conf"
     Delete "$APPDATA\VPNUK\11dedicated.conf"
-    ${If} $userDataFlag == true
-        RMDir /r "$APPDATA\VPNUK"
-    ${EndIf}
+    ; Interactive user-data selection is on the later extras page.
+    ; Never read that choice here, before its controls exist.
     SetShellVarContext all
     RMDir /r "$INSTDIR"
 !macroend
@@ -599,6 +598,8 @@ FunctionEnd
     Var hwnd
     Var ovpnFlag
     Var userDataFlag
+    Var userDataYes
+    Var userDataNo
     Var wgRemovalYes
     Var wgRemovalNo
 
@@ -660,17 +661,17 @@ FunctionEnd
         Pop $hwnd
 
         ${NSD_CreateRadioButton} 12u 96u 100% 12u "Yes"
-        pop $hwnd
-        nsDialogs::SetUserData $hwnd "true"
-        ${NSD_OnClick} $hwnd un.dataRadioClick
-        ${NSD_AddStyle} $hwnd ${WS_GROUP}
+        Pop $userDataYes
+        nsDialogs::SetUserData $userDataYes "true"
+        ${NSD_OnClick} $userDataYes un.dataRadioClick
+        ${NSD_AddStyle} $userDataYes ${WS_GROUP}
 
         ${NSD_CreateRadioButton} 12u 108u 100% 12u "No"
-        pop $hwnd
-        nsDialogs::SetUserData $hwnd "false"
-        ${NSD_OnClick} $hwnd un.dataRadioClick
+        Pop $userDataNo
+        nsDialogs::SetUserData $userDataNo "false"
+        ${NSD_OnClick} $userDataNo un.dataRadioClick
 
-        ${NSD_Check} $hwnd
+        ${NSD_Check} $userDataNo
         StrCpy $userDataFlag "false"
 
     ; -------------------------------------
@@ -694,6 +695,12 @@ FunctionEnd
 
     Function un.OvpnPageLeave
         ${NSD_GetState} $wgRemovalYes $wgRemovalFlag
+        ; Read the actual control, not an earlier lifecycle flag or click event.
+        ${NSD_GetState} $userDataYes $R0
+        StrCpy $userDataFlag "false"
+        ${If} $R0 == ${BST_CHECKED}
+            StrCpy $userDataFlag "true"
+        ${EndIf}
         ${If} $ovpnFlag == ""
         ${OrIf} $userDataFlag == ""
             MessageBox MB_OK "Please specify your choice"
@@ -715,6 +722,26 @@ FunctionEnd
                 !insertmacro logWireGuardUninstall "Starting selected interactive full WireGuard removal"
                 !insertmacro runWireGuardCleanup "RemoveWireGuard"
             ${EndIf}
+        ${EndIf}
+
+        ; This page follows customRemoveFiles. Remote peer cleanup and the
+        ; credential-free recovery identity have already been handled there.
+        ; Remove profiles, credentials, preferences and Electron session data
+        ; only after the user has explicitly selected Yes.
+        !insertmacro logWireGuardUninstall "Interactive clear application user data=$userDataFlag"
+        ${If} $userDataFlag == "true"
+            ClearErrors
+            RMDir /r "$APPDATA\VPNUK"
+            IfErrors vpnuk_user_data_failed
+            IfFileExists "$APPDATA\VPNUK\*.*" vpnuk_user_data_failed vpnuk_user_data_cleared
+        vpnuk_user_data_failed:
+            !insertmacro logWireGuardUninstall "Application user data removal NOT COMPLETE"
+            MessageBox MB_OK|MB_ICONSTOP "Application user data could not be fully removed.$\r$\nClose VPNUK and retry.$\r$\nFolder: $APPDATA\VPNUK"
+            GetDlgItem $0 $hWndParent 1
+            EnableWindow $0 1
+            Abort
+        vpnuk_user_data_cleared:
+            !insertmacro logWireGuardUninstall "Application user data removed"
         ${EndIf}
 
         ; ----------- Updater cache -----------
