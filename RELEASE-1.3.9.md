@@ -11,7 +11,8 @@ and connection settings together in one desktop application.
 Version **1.3.9** adds IP-based split tunnelling for OpenVPN and WireGuard,
 more reliable profile saving, refreshed WireGuard configuration management,
 detailed WireGuard diagnostics, ARM64 installer and OpenVPN scramble support, and improved dependency
-installation and removal.
+installation and removal. It also corrects the optional deletion of saved
+application data during uninstall.
 
 ## What the app does
 
@@ -129,6 +130,10 @@ WireGuard installation runs quietly while VPNUK Setup displays
 - Downloads the official MSI for the native Windows architecture.
 - Verifies the published checksum and WireGuard publisher signature before
   installation.
+- Reuses an existing verified installation of the current WireGuard version
+  rather than unnecessarily reinstalling it.
+- Handles repairs where Windows registered the original WireGuard installer
+  under a hash-style filename and the original download is no longer present.
 - Closes the existing WireGuard manager before installation or repair.
 - Does not automatically open the standalone WireGuard application afterward.
 - Does not automatically restart Windows.
@@ -188,6 +193,43 @@ for those runtime tests.
 - Consistent selected-item and hover styling in profile dropdowns.
 - Matching Yes/No controls for optional OpenVPN and WireGuard removal.
 - Visible installation status while WireGuard installs quietly.
+
+### 9. Corrected application-data removal
+
+The uninstaller's **Clear application user data** choice now runs after the
+selection has been made, rather than before that page is displayed.
+
+- **No** is selected by default and keeps saved profiles and application data.
+- **Yes** removes VPNUK's saved profiles, stored account credentials,
+  preferences and application session/cache data from its roaming data folder.
+- Removed data is not restored when VPNUK is reinstalled.
+- If deletion cannot finish, the uninstaller reports the failure instead of
+  silently treating the data as removed.
+- The separate credential-free WireGuard cleanup/recovery record is retained
+  when needed to recover this device's identity and retry pending server cleanup.
+  It is not a backup of saved profiles or passwords.
+
+WireGuard removal, OpenVPN removal and application-data removal remain
+independent choices.
+
+## Release validation and private-candidate status
+
+The owner has confirmed successful Windows testing of WireGuard connections,
+the update from **1.3.8 to 1.3.9**, optional WireGuard removal, existing and fresh
+WireGuard installation, and application-data removal followed by reinstall.
+The owner also considers the split-tunnelling, profile-saving and obfuscation
+work ready for the final candidate.
+
+Automated Windows checks cover native WireGuard adapter creation and
+fresh-config reconnect, existing-installation reuse, missing-file repair with
+a hash-named MSI source, the actual uninstaller Yes/No controls, and
+application-data preservation/removal across reinstall.
+
+These results do not claim physical ARM64 execution or a live scramble
+connection test. The ARM64 package and dependency checks are described above.
+
+This signed candidate remains a **private draft for one final owner test**.
+It must not be published until the owner gives separate approval.
 
 ## Installation and updating
 
