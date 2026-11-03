@@ -50,13 +50,7 @@ connection profiles using your VPNUK account.
 - Administrator permission is required. Disconnect the VPN before updating.
 - Installing VPN components can require an internet connection and a Windows restart.
 - WireGuard requires Windows 10 or later.
-- Installers are signed by **ONLINE PRIVACY SERVICES LTD**.
-
-Physical ARM64 execution and a live ARM64 scramble connection have not been
-independently tested; package architecture and runtime dependencies were checked.
-See the full release notes for validation details and cleanup behaviour.
 
 For support, use Live Help in the app, visit [vpnuk.net](https://www.vpnuk.net/)
-or email service@vpnuk.net.
 
 "WireGuard" and the "WireGuard" logo are registered trademarks of Jason A. Donenfeld.
