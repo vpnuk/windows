@@ -25,6 +25,93 @@ function Assert-WgMsi([string]$File, [string]$ExpectedHash) {
     }
 }
 
+function Get-WgMsiIdentity([string]$File) {
+    $installer = $null
+    $database = $null
+    try {
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        $database = $installer.OpenDatabase($File, 0)
+        $properties = @{}
+        foreach ($property in @('ProductCode', 'ProductVersion')) {
+            $view = $null
+            $record = $null
+            try {
+                $view = $database.OpenView("SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$property'")
+                $view.Execute()
+                $record = $view.Fetch()
+                if (-not $record) { throw "Verified WireGuard MSI has no $property." }
+                $properties[$property] = [string]$record.StringData(1)
+            } finally {
+                if ($record) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($record) }
+                if ($view) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($view) }
+            }
+        }
+        if ($properties.ProductCode -notmatch '^\{[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\}$') {
+            throw 'Verified WireGuard MSI has an invalid product identity.'
+        }
+        return [pscustomobject]@{ ProductCode = $properties.ProductCode; Version = [version]$properties.ProductVersion }
+    } finally {
+        if ($database) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) }
+        if ($installer) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($installer) }
+    }
+}
+
+function Test-WgSameProductInstalled($Identity) {
+    return @((Get-WgProducts) | Where-Object { $_.ProductCode -eq $Identity.ProductCode }).Count -eq 1
+}
+
+function Test-WgInstalledFiles($Identity) {
+    foreach ($path in @(Get-WgExecutablePaths)) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $signature = Get-AuthenticodeSignature -LiteralPath $path
+        if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate -or
+            $signature.SignerCertificate.Subject -notmatch '(^|,\s*)O=WireGuard LLC(,|$)') { continue }
+        $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($path)
+        if ($version.FileMajorPart -eq $Identity.Version.Major -and
+            $version.FileMinorPart -eq $Identity.Version.Minor -and
+            $version.FileBuildPart -eq $Identity.Version.Build) { return $true }
+    }
+    return $false
+}
+
+function Assert-WgSourceName([string]$Name) {
+    # The official bootstrapper can register a hash-only filename, without .msi.
+    # Reuse only a safe basename, never an arbitrary registry-provided path.
+    if ($Name -notmatch '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,199}$' -or
+        $Name -ne [IO.Path]::GetFileName($Name)) {
+        throw 'WireGuard has an unsafe registered MSI package name. No repair was attempted.'
+    }
+}
+
+function Get-WgRegisteredSourceName([string]$ProductCode) {
+    if (-not ('VpnukWireGuardMsiSource' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class VpnukWireGuardMsiSource {
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiSourceListGetInfoW")]
+    private static extern uint GetInfo(string product, string userSid, uint context,
+        uint options, string property, StringBuilder value, ref uint length);
+    public static string PackageName(string product) {
+        uint length = 0;
+        uint result = GetInfo(product, null, 4, 0, "PackageName", null, ref length);
+        if (result != 0 && result != 234) throw new Win32Exception((int)result);
+        var value = new StringBuilder(checked((int)length + 1));
+        length++;
+        result = GetInfo(product, null, 4, 0, "PackageName", value, ref length);
+        if (result != 0) throw new Win32Exception((int)result);
+        return value.ToString();
+    }
+}
+'@
+    }
+    $name = [VpnukWireGuardMsiSource]::PackageName($ProductCode)
+    Assert-WgSourceName $name
+    return $name
+}
+
 function Assert-NoActiveWgTunnels {
     foreach ($service in @(Get-WgServices)) {
         try {
@@ -69,11 +156,34 @@ function Invoke-QuietWgInstall {
     Write-CleanupLog "Downloading official $($entry.Name)"
     Invoke-WebRequest -UseBasicParsing -Uri ('https://download.wireguard.com/windows-client/' + $entry.Name) -OutFile $file -TimeoutSec 120
     Assert-WgMsi $file $entry.Hash
+    $identity = Get-WgMsiIdentity $file
+    $sameProduct = Test-WgSameProductInstalled $identity
+    if ($sameProduct -and (Test-WgInstalledFiles $identity)) {
+        Assert-NoActiveWgTunnels
+        Stop-WgManager
+        Remove-Item -LiteralPath $temporary -Recurse -Force
+        Write-CleanupLog "WireGuard $($identity.Version) is already installed and verified; no MSI reinstallation needed. Standalone app left closed."
+        return 0
+    }
+    $repairArguments = @()
+    if ($sameProduct) {
+        $sourceName = Get-WgRegisteredSourceName $identity.ProductCode
+        $sourceFile = Join-Path $temporary $sourceName
+        if ($sourceFile -ine $file) {
+            Move-Item -LiteralPath $file -Destination $sourceFile
+            $file = $sourceFile
+        }
+        # Supply the registered source name and recache the verified MSI.
+        # Do not weaken Windows Installer's SecureRepair policy.
+        $repairArguments = @('REINSTALL=ALL', 'REINSTALLMODE=vomus')
+        Write-CleanupLog 'Repairing existing WireGuard using its registered MSI source name.'
+    }
     # Recheck after downloading: a user could have connected in the meantime.
     Assert-NoActiveWgTunnels
     Stop-WgManager
     $msiLog = Join-Path $LogDirectory 'wireguard-install-msi.log'
-    $code = Invoke-Native "$env:SystemRoot\System32\msiexec.exe" @('/i', $file, '/qn', '/norestart', 'DO_NOT_LAUNCH=1', '/L*v', $msiLog) 180000
+    $arguments = @('/i', $file, '/qn', '/norestart', 'DO_NOT_LAUNCH=1', '/L*v', $msiLog) + $repairArguments
+    $code = Invoke-Native "$env:SystemRoot\System32\msiexec.exe" $arguments 180000
     # MSI can restart an existing manager during repair/upgrade. Close that UI
     # too, without deleting service registrations, configurations or adapters.
     Stop-WgManager

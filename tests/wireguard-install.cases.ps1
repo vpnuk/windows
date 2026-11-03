@@ -22,6 +22,13 @@ try {
         Throws { Get-WgMsiEntry ($manifest + "`n" + $manifest) AMD64 }
         Throws { Get-WgMsiEntry (('a' * 64) + '  ../wireguard-amd64-1.1.1.msi') AMD64 }
     }
+    Case 'registered MSI source accepts legacy hashes but rejects paths and command fragments' {
+        Assert-WgSourceName ('a' * 64)
+        Assert-WgSourceName 'wireguard-amd64-1.1.1.msi'
+        foreach ($name in @('', '.', '..', '../outside.msi', '..\outside.msi', 'C:\outside.msi', '/qn', 'bad name.msi', 'bad;name.msi')) {
+            Throws { Assert-WgSourceName $name }
+        }
+    }
     $file = Join-Path $temporary 'test.msi'
     [IO.File]::WriteAllText($file, 'synthetic MSI')
     Add-Type -Path (Join-Path $PSScriptRoot '..\nsis\WireGuardHash.cs')
@@ -107,12 +114,27 @@ try {
     function Stop-WgManager { $script:installCalls += 'stop' }
     function Get-WgProducts { return @([pscustomobject]@{ ProductCode = 'verified-test-product' }) }
     function Get-WgExecutablePaths { return @('verified-test-executable') }
+    function Get-WgMsiIdentity { param($File); return [pscustomobject]@{ ProductCode = '{5D46ED04-DEA2-47D0-A957-F82C3EF577FE}'; Version = [version]'1.1.1' } }
+    $script:sameProduct = $false
+    $script:healthyProduct = $true
+    $script:registeredSource = '362341b3642243a7e1e10e1a061b4aa9aa1433f7c2b96e07f818cdd83835803e'
+    function Test-WgSameProductInstalled { param($Identity); return $script:sameProduct }
+    function Test-WgInstalledFiles { param($Identity); return $script:healthyProduct }
+    function Get-WgRegisteredSourceName { param($ProductCode); return $script:registeredSource }
     function Invoke-Native {
         param($File, [string[]]$Arguments, $Timeout)
         Assert ($Arguments[0] -eq '/i') 'Unexpected MSI action'
         Assert ($Arguments -contains '/qn') 'MSI must have no UI'
         Assert ($Arguments -contains '/norestart') 'MSI must not restart Windows'
         Assert ($Arguments -contains 'DO_NOT_LAUNCH=1') 'MSI must not launch WireGuard'
+        if ($script:sameProduct) {
+            Assert ([IO.Path]::GetFileName($Arguments[1]) -eq $script:registeredSource) 'Repair lost registered hash-style source name'
+            Assert (Test-Path -LiteralPath $Arguments[1]) 'Registered source file is missing'
+            Assert ($Arguments -contains 'REINSTALL=ALL') 'Repair must restore missing files'
+            Assert ($Arguments -contains 'REINSTALLMODE=vomus') 'Repair must recache verified MSI'
+        } else {
+            Assert ($Arguments -notcontains 'REINSTALL=ALL') 'Fresh install must not use repair flags'
+        }
         $script:installCalls += 'msi'
         return $script:installCode
     }
@@ -123,6 +145,20 @@ try {
             $script:installCalls = @()
             Assert ((Invoke-QuietWgInstall) -eq 3010) 'Restart-required result was lost'
             Assert (($script:installCalls -join ',') -eq 'check,manifest,download,verify,check,stop,msi,stop') 'Unsafe install order'
+        }
+        Case 'verified same-version installation skips MSI and closes standalone manager' {
+            $script:sameProduct = $true
+            $script:installCalls = @()
+            Assert ((Invoke-QuietWgInstall) -eq 0) 'Existing installation was not accepted'
+            Assert (($script:installCalls -join ',') -eq 'check,manifest,download,verify,check,stop') 'Existing installation was unnecessarily reinstalled'
+        }
+        Case 'same-version missing files repair uses registered hash filename and recaches MSI' {
+            $script:healthyProduct = $false
+            $script:installCalls = @()
+            Assert ((Invoke-QuietWgInstall) -eq 3010) 'Repair lost restart-required result'
+            Assert (($script:installCalls -join ',') -eq 'check,manifest,download,verify,check,stop,msi,stop') 'Unsafe repair order'
+            $script:sameProduct = $false
+            $script:healthyProduct = $true
         }
         Case 'MSI failure is reported even when manager closure succeeds' {
             $script:installCalls = @()
