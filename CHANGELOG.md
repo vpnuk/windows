@@ -7,6 +7,9 @@
 - Generate the EAP settings using Windows' supported VPN configuration tools, with Windows logon credentials disabled.
 - Stop and report an error if the EAP profile cannot be created.
 - Continue using the VPN server's DNS hostname for IKEv2 connections.
+- Match the existing server proposals: IKE AES-256 / SHA-384 / DH Group 2; ESP AES-256 / SHA-1 (96-bit authentication tag); no PFS.
+- Stop and report an error if Windows cannot apply the IPsec settings, rather than attempting a connection with unknown settings.
+- Compatibility note: DH Group 2 and ESP SHA-1 are legacy settings used by the existing servers; this does not upgrade the network's cryptographic security.
 
 ### Installer
 - Added this version-by-version changelog, available offline after installation.

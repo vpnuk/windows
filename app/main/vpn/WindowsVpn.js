@@ -9,7 +9,7 @@ const { readFile } = require('fs').promises;
 const { writeFileSync } = require('fs');
 const { encode, decode } = require('ini');
 const VpnBase = require('./VpnBase');
-const { createIkev2ProfileCommand } = require('../../modules/windows-ikev2');
+const { createIkev2ProfileCommand, createIkev2IpsecCommand } = require('../../modules/windows-ikev2');
 
 // How often (ms) to poll the Windows VPN connection status for an unexpected drop.
 const DROP_POLL_INTERVAL = 5000;
@@ -224,10 +224,10 @@ class WindowsVpn extends VpnBase {
 
         this.#log(`ADD-CONNECTION output: ${result?.trim() || '(none)'}`);
 
-        // IKEv2 only: set explicit IPsec cipher suite (AES-256/SHA-256/DH-14).
+        // IKEv2 only: match the existing VPNUK server proposals.
         // EAP configuration is supplied atomically when the profile is created.
         if (this.type === VpnType.IKEv2.label) {
-            this.#log('IKEv2 — setting explicit IPsec cipher suite (AES-256/SHA-256/DH-14)');
+            this.#log('IKEv2 — applying IKE AES-256/SHA-384/Group 2; ESP AES-256/SHA-1; PFS None');
             await this.#setIkev2IpsecConfig();
         }
 
@@ -235,26 +235,13 @@ class WindowsVpn extends VpnBase {
     }
 
     async #setIkev2IpsecConfig() {
-        // Explicitly configure the IKEv2 IPsec cipher suite to match what
-        // VPNUK's strongSwan-based servers accept.  By default Windows proposes
-        // every suite it supports; if the server only accepts a specific subset
-        // it replies with an "Invalid payload received" error (13868).
-        // AES-256 / SHA-256 / DH group-14 is the most widely supported config.
-        const cmd =
-            `Set-VpnConnectionIPsecConfiguration` +
-            ` -ConnectionName '${this._name}'` +
-            ` -AuthenticationTransformConstants SHA256128` +
-            ` -CipherTransformConstants AES256` +
-            ` -DHGroup Group14` +
-            ` -EncryptionMethod AES256` +
-            ` -IntegrityCheckMethod SHA256` +
-            ` -PfsGroup None` +
-            ` -Force`;
+        const cmd = createIkev2IpsecCommand(this._name);
         try {
-            const result = await this.#logSpawn('powershell', ['-Command', cmd]);
+            const result = await this.#logSpawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', cmd]);
             this.#log(`IKEv2-IPSEC result: ${result?.trim() || '(none)'}`);
         } catch (err) {
-            this.#log(`IKEv2-IPSEC config error (non-fatal): ${err.message}`);
+            this.#log(`IKEv2-IPSEC config failed — connection stopped: ${err.message}`);
+            throw err;
         }
     }
 

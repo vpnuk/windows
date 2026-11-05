@@ -19,4 +19,20 @@ function createIkev2ProfileCommand(name, server) {
     ].join(' ');
 }
 
-module.exports = { createIkev2ProfileCommand };
+// Match the existing VPNUK server proposals. Group 2 and SHA-1 are legacy
+// compatibility settings, not a recommendation for new server deployments.
+function createIkev2IpsecCommand(name) {
+    return [
+        "$ErrorActionPreference = 'Stop'; Set-VpnConnectionIPsecConfiguration",
+        `-ConnectionName ${psString(name)}`,
+        '-AuthenticationTransformConstants SHA196',
+        '-CipherTransformConstants AES256',
+        '-DHGroup Group2',
+        '-EncryptionMethod AES256',
+        '-IntegrityCheckMethod SHA384',
+        '-PfsGroup None',
+        '-Force -ErrorAction Stop',
+    ].join(' ');
+}
+
+module.exports = { createIkev2ProfileCommand, createIkev2IpsecCommand };

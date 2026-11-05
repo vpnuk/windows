@@ -16,6 +16,10 @@ try {
     if ($profile.ServerAddress -ne 'example.invalid') { throw 'Server hostname changed' }
     if ($profile.SplitTunneling) { throw 'Full-tunnel routing changed' }
     Write-Host 'PASS native Windows IKEv2 profile uses EAP type 26 and disables Windows logon credentials'
+    $ipsecCommand = & node -e "process.stdout.write(require('./app/modules/windows-ikev2').createIkev2IpsecCommand(process.argv[1]))" $name
+    if ($LASTEXITCODE -ne 0) { throw 'Could not generate IKEv2 IPsec command' }
+    & ([scriptblock]::Create($ipsecCommand)) | Out-Null
+    Write-Host 'PASS native Windows accepts IKE AES256/SHA384/Group2 and ESP AES256/SHA196 with no PFS (no live connection attempted)'
 } finally {
     if (Get-VpnConnection -Name $name -ErrorAction SilentlyContinue) {
         Remove-VpnConnection -Name $name -Force -ErrorAction Stop
