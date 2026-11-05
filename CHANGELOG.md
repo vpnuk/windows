@@ -10,6 +10,7 @@
 - Match the existing server proposals: IKE AES-256 / SHA-384 / DH Group 2; ESP AES-256 / SHA-1 (96-bit authentication tag); no PFS.
 - Stop and report an error if Windows cannot apply the IPsec settings, rather than attempting a connection with unknown settings.
 - Compatibility note: DH Group 2 and ESP SHA-1 are legacy settings used by the existing servers; this does not upgrade the network's cryptographic security.
+- Temporary diagnostic build: preserve the Windows IKEv2 profile after a failed connection for inspection with rasphone.exe. Normal disconnect cleanup is unchanged; retrying in VPNUK recreates the profile.
 
 ### Installer
 - Added this version-by-version changelog, available offline after installation.

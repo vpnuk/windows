@@ -34,7 +34,8 @@ async function connectionCase(failure) {
         '../utils/async': { spawnChild: async (file, args) => {
             const command = args.join(' ');
             commands.push(command);
-            if (command.includes('Select -ExpandProperty ConnectionStatus')) return dialled ? 'Connected' : 'Disconnected';
+            if (command.includes('Select -ExpandProperty ConnectionStatus')) return dialled && failure !== 'status' ? 'Connected' : 'Disconnected';
+            if (command.includes('rasdial') && args.includes('/d')) dialled = false;
             if (command.includes('New-EapConfiguration') && failure === 'profile') throw new Error('EAP setup failed');
             if (command.includes('Set-VpnConnectionIPsecConfiguration') && failure === 'ipsec') throw new Error('IPsec setup failed');
             return '';
@@ -50,7 +51,7 @@ async function connectionCase(failure) {
                 child.stdout = new EventEmitter();
                 child.stderr = new EventEmitter();
                 child.kill = () => {};
-                queueMicrotask(() => child.emit('close', 0));
+                queueMicrotask(() => child.emit('close', failure === 'dial' ? 703 : 0));
                 return child;
             },
         },
@@ -65,7 +66,7 @@ async function connectionCase(failure) {
         connectedHook: () => { connected = true; }, errorHook: err => { error = err; },
     }, {});
     await vpn.connect();
-    assert.equal(dialled, !failure);
+    assert.equal(dialled, failure !== 'profile' && failure !== 'ipsec');
     assert.equal(connected, !failure);
     assert.equal(Boolean(error), Boolean(failure));
     const setup = commands.find(command => command.includes('Add-VpnConnection'));
@@ -76,6 +77,11 @@ async function connectionCase(failure) {
     assert(!logs.join('').includes(profile.credentials.password));
     if (failure === 'profile') assert(logs.join('').includes('CONNECT FAILED — EAP setup failed'));
     if (failure === 'ipsec') assert(logs.join('').includes('CONNECT FAILED — IPsec setup failed'));
+    if (failure) {
+        const afterSetup = commands.slice(commands.indexOf(setup) + 1);
+        assert(!afterSetup.some(command => command.includes('Remove-VpnConnection')));
+        assert(logs.join('').includes('preserving failed Windows profile "VPNUK-IKEv2"'));
+    }
     if (failure !== 'profile') {
         const ipsec = commands.find(command => command.includes('Set-VpnConnectionIPsecConfiguration'));
         assert(ipsec.includes('-AuthenticationTransformConstants SHA196'));
@@ -86,6 +92,11 @@ async function connectionCase(failure) {
         assert(ipsec.includes('-PfsGroup None'));
         assert(ipsec.includes('-Force -ErrorAction Stop'));
         assert(commands.indexOf(ipsec) > commands.indexOf(setup));
+    }
+    if (!failure) {
+        const beforeDisconnect = commands.length;
+        await vpn.disconnect();
+        assert(commands.slice(beforeDisconnect).some(command => command.includes('Remove-VpnConnection')));
     }
 }
 
@@ -107,6 +118,9 @@ async function main() {
     await connectionCase('ipsec');
     assert(createIkev2IpsecCommand("user's-profile").includes("'user''s-profile'"));
     console.log('PASS server-compatible IPsec settings and fatal IPsec setup failure before dialling');
+    await connectionCase('dial');
+    await connectionCase('status');
+    console.log('PASS failed IKEv2 profiles retained for rasphone after error 703 or disconnected final status; normal disconnect still removes profile');
     const md = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
     const html = render(md);
     assert(html.includes('1.4.0') && html.includes('1.3.9'));

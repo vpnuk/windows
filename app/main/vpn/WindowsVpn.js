@@ -113,7 +113,7 @@ class WindowsVpn extends VpnBase {
         } catch (err) {
             this.#log(`CONNECT FAILED — ${err.message}`);
             this.#stopDropWatcher();
-            await this.#removeConnection().catch(e => this.#log(`cleanup removeConnection error: ${e.message}`));
+            await this.#cleanupFailedConnection();
             this.#connectionStatus = connectionStates.disconnected;
             this._disconnectedHook?.(true);
             this._logStream.end();
@@ -136,7 +136,7 @@ class WindowsVpn extends VpnBase {
         }
         else {
             this.#log(`CONNECT FAILED — status after connect is "${finalStatus}" not Connected`);
-            await this.#removeConnection().catch(e => this.#log(`cleanup removeConnection error: ${e.message}`));
+            await this.#cleanupFailedConnection();
             this.#connectionStatus = connectionStates.disconnected;
             this._disconnectedHook?.(true);
             this._logStream.end();
@@ -176,6 +176,16 @@ class WindowsVpn extends VpnBase {
         catch { // error if there are no connection, ok with that
             return null;
         }
+    }
+
+    async #cleanupFailedConnection() {
+        // TEMPORARY diagnostic behaviour: retain the exact failed IKEv2 profile
+        // for an interactive rasphone test. Normal disconnect cleanup is unchanged.
+        if (this.type === VpnType.IKEv2.label) {
+            this.#log(`IKEv2 diagnostic mode — preserving failed Windows profile "${this._name}". Inspect it with rasphone.exe before retrying in VPNUK; another app attempt recreates the profile.`);
+            return;
+        }
+        await this.#removeConnection().catch(e => this.#log(`cleanup removeConnection error: ${e.message}`));
     }
 
     async #removeConnection() {
