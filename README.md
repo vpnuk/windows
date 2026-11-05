@@ -1,5 +1,18 @@
 # VPNUK for Windows
 
+## Version 1.4.0 — Private testing
+
+This candidate focuses on correcting Windows IKEv2 username/password
+authentication. OpenVPN and WireGuard connection code is unchanged.
+Testing must be completed before signing or public release.
+
+**[Read the changelog for 1.4.0 and 1.3.9](CHANGELOG.md)**
+
+The installer finish screen also links to an offline copy of this changelog,
+while retaining the Run VPNUK checkbox.
+
+The signed public release below remains 1.3.9 until a new release is approved.
+
 ## Version 1.3.9
 
 Manage OpenVPN, WireGuard and IKEv2 connections, select servers and save named

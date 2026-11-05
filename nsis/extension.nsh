@@ -70,6 +70,26 @@
 !insertMacro MUI_PAGE_WELCOME
 !macroEnd
 
+; Keep electron-builder's normal Run checkbox and scheduled-task launch link.
+; A separate hyperlink opens the installed changelog without internet access.
+!macro customFinishPage
+    !ifndef HIDE_RUN_AFTER_FINISH
+        Function StartApp
+            ${If} ${isUpdated}
+                StrCpy $1 "--updated"
+            ${Else}
+                StrCpy $1 ""
+            ${EndIf}
+            ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+        FunctionEnd
+        !define MUI_FINISHPAGE_RUN
+        !define MUI_FINISHPAGE_RUN_FUNCTION "StartApp"
+    !endif
+    !define MUI_FINISHPAGE_LINK "View the VPNUK changelog"
+    !define MUI_FINISHPAGE_LINK_LOCATION "$INSTDIR\CHANGELOG.html"
+    !insertmacro MUI_PAGE_FINISH
+!macroend
+
 ; ────────────────────────────────────────────────────────────────────────────────
 ; COMMON
 ; ────────────────────────────────────────────────────────────────────────────────

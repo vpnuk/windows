@@ -12,7 +12,7 @@ on:
         type: choice
         options: ['false', 'true']
       publish:
-        description: 'Publish as live release (clean filenames, v1.3.x tag, not a draft)'
+        description: 'Publish as live release (clean filenames, version tag, not a draft)'
         required: false
         default: 'false'
         type: choice
@@ -85,6 +85,12 @@ jobs:
 
       - name: Check Windows feature logic
         run: yarn test:windows
+
+      - name: Check actual Windows IKEv2 EAP profile
+        shell: powershell
+        run: |
+          & .\tests\ikev2-profile-native.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'IKEv2 EAP profile checks failed' }
 
       - name: Check WireGuard uninstall failure and ownership cases
         shell: powershell
@@ -390,7 +396,10 @@ jobs:
           $artifacts | ForEach-Object { Write-Host "Artifact: $_" }
 
           if ($draft) {
-            $notes = if ($env:BUILD_SIGNED -eq 'true') { "Signed private candidate. Build $build." } else { "UNSIGNED PRIVATE TEST ONLY. No paid signing. Install manually; not for the automatic updater. Test all features and optional WireGuard removal before approving a signed release. Build $build." }
+            $notes = if ($env:BUILD_SIGNED -eq 'true') { "Signed private candidate. Build $build." } else { "UNSIGNED PRIVATE TEST ONLY. No paid signing. Install manually; not for the automatic updater. Build $build." }
+            if (Test-Path ".\CHANGELOG.md") {
+              $notes += "`n`n" + (Get-Content ".\CHANGELOG.md" -Raw)
+            }
             gh release create "$tag" --title "$title" --draft --notes "$notes" @artifacts
           } else {
             gh release view "$tag" --json tagName 2>$null

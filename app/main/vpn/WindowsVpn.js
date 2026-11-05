@@ -9,6 +9,7 @@ const { readFile } = require('fs').promises;
 const { writeFileSync } = require('fs');
 const { encode, decode } = require('ini');
 const VpnBase = require('./VpnBase');
+const { createIkev2ProfileCommand } = require('../../modules/windows-ikev2');
 
 // How often (ms) to poll the Windows VPN connection status for an unexpected drop.
 const DROP_POLL_INTERVAL = 5000;
@@ -206,13 +207,10 @@ class WindowsVpn extends VpnBase {
             ? (this._server.dns || this._server.host)
             : this._server.host;
 
-        this.#log(`ADD-CONNECTION TunnelType=${this.type} ServerAddress=${serverAddress} AuthMethod=MSChapv2 SplitTunneling=false`);
+        const isIkev2 = this.type === VpnType.IKEv2.label;
+        this.#log(`ADD-CONNECTION TunnelType=${this.type} ServerAddress=${serverAddress} AuthMethod=${isIkev2 ? 'Eap (EAP-MSCHAPv2, type 26)' : 'MSChapv2'} SplitTunneling=false`);
 
-        // MSChapv2 auth: avoids EAP credential-store lookup issues and lets
-        // rasdial connect with explicit credentials in non-interactive mode.
-        // Connect-VpnConnection (EAP path) is unreliable — it requires the
-        // VpnClient module which is absent or elevation-gated on many machines.
-        const cmd = [
+        const cmd = isIkev2 ? createIkev2ProfileCommand(this._name, serverAddress) : [
             'Add-VpnConnection',
             `-Name '${this._name}'`,
             `-TunnelType ${this.type}`,
@@ -222,57 +220,18 @@ class WindowsVpn extends VpnBase {
             `-Force -RememberCredential -PassThru`,
         ].join(' ');
 
-        const result = await this.#logSpawn('powershell', ['-Command', cmd]);
+        const result = await this.#logSpawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', cmd]);
 
         this.#log(`ADD-CONNECTION output: ${result?.trim() || '(none)'}`);
 
         // IKEv2 only: set explicit IPsec cipher suite (AES-256/SHA-256/DH-14).
-        // EAP config and Credential Manager storage are not needed for MSChapv2.
+        // EAP configuration is supplied atomically when the profile is created.
         if (this.type === VpnType.IKEv2.label) {
             this.#log('IKEv2 — setting explicit IPsec cipher suite (AES-256/SHA-256/DH-14)');
             await this.#setIkev2IpsecConfig();
         }
 
         return result;
-    }
-
-    async #setIkev2EapConfig() {
-        // EAP type 26 = EAP-MSCHAPv2 (raw, no PEAP wrapper).
-        // Windows defaults to type 25 (PEAP) when AuthenticationMethod=Eap is set
-        // via Add-VpnConnection.  IKEv2 servers that use EAP-MSCHAPv2 directly
-        // reject PEAP with an IKEv2 "Invalid payload received" error.
-        const eapXml = [
-            '<?xml version="1.0"?>',
-            '<EapHostConfig xmlns="http://www.microsoft.com/provisioning/EapHostConfig">',
-            '  <EapMethod>',
-            '    <Type xmlns="http://www.microsoft.com/provisioning/EapCommon">26</Type>',
-            '    <VendorId xmlns="http://www.microsoft.com/provisioning/EapCommon">0</VendorId>',
-            '    <VendorType xmlns="http://www.microsoft.com/provisioning/EapCommon">0</VendorType>',
-            '    <AuthorId xmlns="http://www.microsoft.com/provisioning/EapCommon">0</AuthorId>',
-            '  </EapMethod>',
-            '  <Config xmlns="http://www.microsoft.com/provisioning/MsChapV2ConnectionPropertiesV1">',
-            '    <MsChapV2Properties>',
-            '      <UseWinlogonCredentials>false</UseWinlogonCredentials>',
-            '    </MsChapV2Properties>',
-            '  </Config>',
-            '</EapHostConfig>',
-        ].join('');
-
-        // Write to a temp file to avoid PowerShell quoting issues with the XML string.
-        const tmpPath = '%TEMP%\\vpnuk_ikev2_eap.xml';
-        const cmd =
-            `Set-Content -Path '${tmpPath}' -Value '${eapXml}' -Encoding UTF8;` +
-            ` $doc = [xml](Get-Content -Path '${tmpPath}' -Encoding UTF8);` +
-            ` Set-VpnConnectionEapConfiguration -ConnectionName '${this._name}'` +
-            `   -EapConfigXmlStream $doc -Force;` +
-            ` Write-Output "EAP-CONFIG-SET"`;
-
-        try {
-            const result = await this.#logSpawn('powershell', ['-Command', cmd]);
-            this.#log(`IKEv2-EAP result: ${result?.trim() || '(none)'}`);
-        } catch (err) {
-            this.#log(`IKEv2-EAP config error (non-fatal): ${err.message}`);
-        }
     }
 
     async #setIkev2IpsecConfig() {
@@ -296,25 +255,6 @@ class WindowsVpn extends VpnBase {
             this.#log(`IKEv2-IPSEC result: ${result?.trim() || '(none)'}`);
         } catch (err) {
             this.#log(`IKEv2-IPSEC config error (non-fatal): ${err.message}`);
-        }
-    }
-
-    async #storeIkev2Credentials() {
-        // EAP-MSCHAPv2 (type 26) requires credentials pre-stored in Windows
-        // Credential Manager — rasdial ignores inline username/password for EAP
-        // connections and returns error 703 if no stored creds exist.
-        const cmd =
-            `Set-VpnConnectionUsernamePassword` +
-            ` -ConnectionName '${this._name}'` +
-            ` -UserName '${this._credentials.login}'` +
-            ` -Password '${this._credentials.password}'` +
-            ` -ErrorAction SilentlyContinue;` +
-            ` Write-Output "CREDS-SET"` ;
-        try {
-            const result = await this.#logSpawn('powershell', ['-Command', cmd]);
-            this.#log(`IKEv2-CREDS result: ${result?.trim() || '(none)'}`);
-        } catch (err) {
-            this.#log(`IKEv2-CREDS error (non-fatal): ${err.message}`);
         }
     }
 
@@ -382,10 +322,8 @@ class WindowsVpn extends VpnBase {
     }
 
     async #vpnConnectIkev2(timeoutMs) {
-        // MSChapv2 + rasdial: no EAP, no VpnClient module dependency.
-        // rasdial works reliably in non-interactive sessions for non-EAP IKEv2.
-        // Connect-VpnConnection (EAP path) was unreliable — VpnClient module
-        // not available on all Windows builds.
+        // Supply the VPNUK credentials to native RAS, without shell interpolation.
+        // The connection profile selects EAP-MSCHAPv2, not Windows logon credentials.
         this.#log(`VPN-CONNECT using rasdial for IKEv2 "${this._name}" (timeout=${timeoutMs}ms)`);
 
         const child = cp.spawn(
@@ -412,6 +350,10 @@ class WindowsVpn extends VpnBase {
                 child.kill();
                 reject(new Error('VPN connection timed out after 45 seconds'));
             }, timeoutMs);
+            child.on('error', err => {
+                clearTimeout(timer);
+                reject(new Error(`Unable to start Windows IKEv2 dialler: ${err.message}`));
+            });
             child.on('close', code => {
                 clearTimeout(timer);
                 this.#log(`VPN-CONNECT IKEv2 rasdial closed — exit code ${code}`);
@@ -425,8 +367,7 @@ class WindowsVpn extends VpnBase {
     async #vpnConnect() {
         const TIMEOUT_MS = 45_000;
 
-        // IKEv2/EAP: rasdial returns 703 in non-interactive mode — delegate to
-        // Connect-VpnConnection which supports -Credential for EAP connections.
+        // IKEv2 uses the EAP profile created above and native RAS credentials.
         if (this.type === VpnType.IKEv2.label) {
             return this.#vpnConnectIkev2(TIMEOUT_MS);
         }
