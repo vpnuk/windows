@@ -1,4 +1,6 @@
 const cp = require('child_process');
+const path = require('path');
+const { existsSync } = require('fs');
 const {
     connectionStates,
     VpnType,
@@ -87,7 +89,7 @@ class WindowsVpn extends VpnBase {
         }
         const afterDisc = await this.getConnectionStatus();
         this.#log(`Status after disconnect → "${afterDisc}"`);
-        if (afterDisc === connectionStates.disconnected) {
+        if (afterDisc === connectionStates.disconnected && this.type !== VpnType.IKEv2.label) {
             this.#log('Removing stale connection profile');
             await this.#removeConnection();
         }
@@ -156,10 +158,11 @@ class WindowsVpn extends VpnBase {
         }
         const statusAfter = await this.getConnectionStatus();
         this.#log(`Status after rasdial /d → "${statusAfter}"`);
-        if (statusAfter === connectionStates.disconnected) {
+        if (statusAfter === connectionStates.disconnected && this.type !== VpnType.IKEv2.label) {
             this.#log('Removing connection profile');
             await this.#removeConnection();
         }
+        if (this.type === VpnType.IKEv2.label) this.#log('IKEv2 profile retained for reconnect and Windows-managed EAP credentials');
         this.#connectionStatus = connectionStates.disconnected;
         this.#log('=== DISCONNECT COMPLETE ===');
         this._disconnectedHook?.(true);
@@ -179,10 +182,9 @@ class WindowsVpn extends VpnBase {
     }
 
     async #cleanupFailedConnection() {
-        // TEMPORARY diagnostic behaviour: retain the exact failed IKEv2 profile
-        // for an interactive rasphone test. Normal disconnect cleanup is unchanged.
+        // Preserve the Windows profile and its Windows-managed EAP credentials.
         if (this.type === VpnType.IKEv2.label) {
-            this.#log(`IKEv2 diagnostic mode — preserving failed Windows profile "${this._name}". Inspect it with rasphone.exe before retrying in VPNUK; another app attempt recreates the profile.`);
+            this.#log(`IKEv2 — preserving failed Windows profile "${this._name}" for troubleshooting and reconnect.`);
             return;
         }
         await this.#removeConnection().catch(e => this.#log(`cleanup removeConnection error: ${e.message}`));
@@ -319,14 +321,20 @@ class WindowsVpn extends VpnBase {
     }
 
     async #vpnConnectIkev2(timeoutMs) {
-        // Supply the VPNUK credentials to native RAS, without shell interpolation.
-        // The connection profile selects EAP-MSCHAPv2, not Windows logon credentials.
-        this.#log(`VPN-CONNECT using rasdial for IKEv2 "${this._name}" (timeout=${timeoutMs}ms)`);
-
+        // EAP user data must be prepared, not just supplied as rasdial argv.
+        const directory = process.env.ELECTRON_ENV === 'Dev'
+            ? path.resolve(__dirname, '../../../nsis')
+            : path.join(path.dirname(process.execPath), 'install-tools');
+        const script = path.join(directory, 'ikev2-connect.ps1');
+        const windows = process.env.SystemRoot || 'C:\\Windows';
+        const sysnative = path.join(windows, 'Sysnative', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+        const powershell = existsSync(sysnative) ? sysnative
+            : path.join(windows, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+        this.#log(`VPN-CONNECT preparing Windows EAP credentials through private stdin for IKEv2 "${this._name}" (timeout=${timeoutMs}ms)`);
         const child = cp.spawn(
-            'rasdial',
-            [this._name, this._credentials.login, this._credentials.password],
-            { shell: false }
+            powershell,
+            ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+            { shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }
         );
 
         return new Promise((resolve, reject) => {
@@ -353,11 +361,21 @@ class WindowsVpn extends VpnBase {
             });
             child.on('close', code => {
                 clearTimeout(timer);
-                this.#log(`VPN-CONNECT IKEv2 rasdial closed — exit code ${code}`);
+                this.#log(`VPN-CONNECT IKEv2 credential worker closed — exit code ${code}`);
                 if (stdout.trim()) this._logStream.write(stdout);
-                if (code) reject(new Error(`rasdial exited with error ${code}:\n${stdout}\n${stderr}`));
+                if (code !== 0) reject(new Error(`IKEv2 Windows connection failed (worker exit ${code}):\n${stdout}\n${stderr}`));
                 else resolve(stdout);
             });
+            child.stdin.on('error', err => {
+                clearTimeout(timer);
+                child.kill();
+                reject(new Error(`Unable to deliver IKEv2 credentials to Windows: ${err.code || 'pipe failure'}`));
+            });
+            child.stdin.end(JSON.stringify({
+                name: this._name,
+                username: this._credentials.login,
+                password: this._credentials.password,
+            }));
         });
     }
 

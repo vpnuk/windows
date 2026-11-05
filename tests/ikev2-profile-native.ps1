@@ -1,4 +1,4 @@
-# Uses the actual Windows VpnClient cmdlets; never dials or sends credentials.
+# Uses actual Windows VpnClient/EAP APIs with dummy credentials; never dials.
 $ErrorActionPreference = 'Stop'
 $name = 'VPNUK-EAP-Test-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
 try {
@@ -20,6 +20,20 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not generate IKEv2 IPsec command' }
     & ([scriptblock]::Create($ipsecCommand)) | Out-Null
     Write-Host 'PASS native Windows accepts IKE AES256/SHA384/Group2 and ESP AES256/SHA196 with no PFS (no live connection attempted)'
+    $originalGuid = (Get-VpnConnection -Name $name).Guid
+    $request = @{ name = $name; username = 'dummy-user'; password = 'dummy-p@ss<&"-first' } | ConvertTo-Json -Compress
+    $request | & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File nsis/ikev2-connect.ps1 -PrepareOnly
+    if ($LASTEXITCODE -ne 0) { throw 'First-use non-interactive EAP credential preparation failed' }
+    & ([scriptblock]::Create($command)) | Out-Null
+    if ((Get-VpnConnection -Name $name).Guid -ne $originalGuid) { throw 'Existing profile was recreated' }
+    $request = @{ name = $name; username = 'different-user'; password = 'updated-p@ss<&"-second' } | ConvertTo-Json -Compress
+    $request | & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File nsis/ikev2-connect.ps1 -PrepareOnly
+    if ($LASTEXITCODE -ne 0) { throw 'Updated EAP credentials could not be prepared' }
+    $switchCommand = $command.Replace('example.invalid', 'another.invalid')
+    & ([scriptblock]::Create($switchCommand)) | Out-Null
+    $switched = Get-VpnConnection -Name $name
+    if ($switched.Guid -ne $originalGuid -or $switched.ServerAddress -ne 'another.invalid') { throw 'Server switch did not update in place' }
+    Write-Host 'PASS fresh EAP identity without a dialogue, credential replacement, profile reuse and server update in place (no server authentication attempted)'
 } finally {
     if (Get-VpnConnection -Name $name -ErrorAction SilentlyContinue) {
         Remove-VpnConnection -Name $name -Force -ErrorAction Stop

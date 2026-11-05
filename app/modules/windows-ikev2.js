@@ -10,12 +10,22 @@ function createIkev2ProfileCommand(name, server) {
     }
     return [
         "$ErrorActionPreference = 'Stop'",
+        `$existing = Get-VpnConnection -Name ${psString(name)} -ErrorAction SilentlyContinue`,
         '$eap = New-EapConfiguration -UseWinlogonCredential:$false -ErrorAction Stop',
+        '$validEap = $false',
+        'if ($existing -and $existing.EapConfigXmlStream) { [xml]$saved = $existing.EapConfigXmlStream; $t = $saved.SelectSingleNode("//*[local-name()=\'EapMethod\']/*[local-name()=\'Type\']"); $w = $saved.SelectSingleNode("//*[local-name()=\'UseWinLogonCredentials\' or local-name()=\'UseWinlogonCredentials\']"); $validEap = ($t -and $t.InnerText -eq \'26\' -and $w -and $w.InnerText -eq \'false\') }',
     ].join('; ') + '; ' + [
+        `if ($existing -and $existing.TunnelType -eq 'Ikev2' -and @($existing.AuthenticationMethod) -contains 'Eap' -and $validEap -and $existing.ServerAddress -eq ${psString(server)} -and -not $existing.SplitTunneling -and $existing.RememberCredential) { Write-Output 'IKEv2 profile reused' } elseif ($existing) {`,
+        `Set-VpnConnection -Name ${psString(name)} -TunnelType Ikev2`,
+        `-ServerAddress ${psString(server)} -AuthenticationMethod Eap`,
+        '-EapConfigXmlStream $eap.EapConfigXmlStream',
+        "-SplitTunneling:$false -RememberCredential:$true -Force -ErrorAction Stop; Write-Output 'IKEv2 profile updated in place'",
+        '} else {',
+    ].join(' ') + ' ' + [
         `Add-VpnConnection -Name ${psString(name)} -TunnelType Ikev2`,
         `-ServerAddress ${psString(server)} -AuthenticationMethod Eap`,
         '-EapConfigXmlStream $eap.EapConfigXmlStream',
-        '-SplitTunneling:$false -Force -RememberCredential -PassThru -ErrorAction Stop',
+        "-SplitTunneling:$false -Force -RememberCredential -PassThru -ErrorAction Stop; Write-Output 'IKEv2 profile created' }",
     ].join(' ');
 }
 

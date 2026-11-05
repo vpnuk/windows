@@ -44,12 +44,21 @@ async function connectionCase(failure) {
             spawnSync: () => ({ status: 0 }),
             spawn: (file, args, options) => {
                 dialled = true;
-                assert.equal(file, 'rasdial');
+                assert(file.endsWith('powershell.exe'));
                 assert.equal(options.shell, false);
-                assert.deepEqual(Array.from(args), ['VPNUK-IKEv2', profile.credentials.login, profile.credentials.password]);
+                assert(args.includes('-NonInteractive'));
+                assert(args[args.length - 1].endsWith('ikev2-connect.ps1'));
+                assert(!args.join('').includes(profile.credentials.password));
+                assert(!args.join('').includes(profile.credentials.login));
                 const child = new EventEmitter();
                 child.stdout = new EventEmitter();
                 child.stderr = new EventEmitter();
+                child.stdin = new EventEmitter();
+                child.stdin.end = input => {
+                    assert.deepEqual(JSON.parse(input), {
+                        name: 'VPNUK-IKEv2', username: profile.credentials.login, password: profile.credentials.password,
+                    });
+                };
                 child.kill = () => {};
                 queueMicrotask(() => child.emit('close', failure === 'dial' ? 703 : 0));
                 return child;
@@ -59,6 +68,7 @@ async function connectionCase(failure) {
     const module = { exports: {} };
     vm.runInNewContext(fs.readFileSync(path.join(root, 'app/main/vpn/WindowsVpn.js'), 'utf8'), {
         module, require: id => Object.prototype.hasOwnProperty.call(mocks, id) ? mocks[id] : require(id),
+        process, __dirname: path.join(root, 'app/main/vpn'),
         setTimeout: (fn, delay) => delay === 600 ? (queueMicrotask(fn), 0) : setTimeout(fn, delay),
         clearTimeout, setInterval: () => 1, clearInterval() {},
     });
@@ -96,7 +106,7 @@ async function connectionCase(failure) {
     if (!failure) {
         const beforeDisconnect = commands.length;
         await vpn.disconnect();
-        assert(commands.slice(beforeDisconnect).some(command => command.includes('Remove-VpnConnection')));
+        assert(!commands.slice(beforeDisconnect).some(command => command.includes('Remove-VpnConnection')));
     }
 }
 
@@ -112,7 +122,7 @@ async function main() {
     }
     console.log('PASS IKEv2 EAP command, explicit credentials policy and input quoting');
     await connectionCase(false);
-    console.log('PASS IKEv2 creates EAP profile before dialling with VPNUK credentials');
+    console.log('PASS IKEv2 prepares EAP profile and sends credentials over stdin, never argv');
     await connectionCase('profile');
     console.log('PASS EAP setup failure stops dialling and reports the error');
     await connectionCase('ipsec');
@@ -120,7 +130,11 @@ async function main() {
     console.log('PASS server-compatible IPsec settings and fatal IPsec setup failure before dialling');
     await connectionCase('dial');
     await connectionCase('status');
-    console.log('PASS failed IKEv2 profiles retained for rasphone after error 703 or disconnected final status; normal disconnect still removes profile');
+    console.log('PASS failed IKEv2 profiles and normally disconnected profiles retained for reconnect');
+    assert(cmd.includes('Get-VpnConnection -Name'));
+    assert(cmd.includes('Set-VpnConnection -Name'));
+    assert(cmd.includes('IKEv2 profile reused'));
+    assert(!cmd.includes('Remove-VpnConnection'));
     const md = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
     const html = render(md);
     assert(html.includes('1.4.0') && html.includes('1.3.9'));
@@ -130,6 +144,17 @@ async function main() {
     assert.equal(pkg.version, '1.4.0');
     assert(pkg.scripts['react-build'].endsWith('node scripts/build-changelog.js'));
     assert(pkg.build.extraFiles.some(file => file.from === 'build/changelog.html' && file.to === 'CHANGELOG.html'));
+    for (const name of ['ikev2-connect.ps1', 'Ikev2Credentials.cs']) {
+        assert(pkg.build.extraFiles.some(file => file.to === 'install-tools/' + name));
+    }
+    const worker = fs.readFileSync(path.join(root, 'nsis/ikev2-connect.ps1'), 'utf8');
+    assert(worker.includes('[Console]::In.ReadToEnd()'));
+    assert(worker.includes('rasdial.exe" $name'));
+    assert(!worker.includes('rasdial.exe" $name $'));
+    const native = fs.readFileSync(path.join(root, 'nsis/Ikev2Credentials.cs'), 'utf8');
+    assert(native.includes('EapHostPeerCredentialsXml2Blob'));
+    assert(native.includes('RasSetEapUserDataW'));
+    assert(native.includes('RasGetEapUserIdentityW'));
     const nsis = fs.readFileSync(path.join(root, 'nsis/extension.nsh'), 'utf8');
     assert(nsis.includes('!macro customFinishPage'));
     assert(nsis.includes('MUI_FINISHPAGE_LINK_LOCATION "$INSTDIR\\CHANGELOG.html"'));

@@ -87,6 +87,14 @@
     ],
     "extraFiles": [
       {
+        "from": "nsis/ikev2-connect.ps1",
+        "to": "install-tools/ikev2-connect.ps1"
+      },
+      {
+        "from": "nsis/Ikev2Credentials.cs",
+        "to": "install-tools/Ikev2Credentials.cs"
+      },
+      {
         "from": "build/changelog.html",
         "to": "CHANGELOG.html"
       },
