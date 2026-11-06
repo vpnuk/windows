@@ -148,7 +148,8 @@ async function main() {
         assert(pkg.build.extraFiles.some(file => file.to === 'install-tools/' + name));
     }
     const worker = fs.readFileSync(path.join(root, 'nsis/ikev2-connect.ps1'), 'utf8');
-    assert(worker.includes('[Console]::In.ReadToEnd()'));
+    assert(worker.includes('[Console]::OpenStandardInput()'));
+    assert(!worker.includes('[Console]::InputEncoding ='));
     assert(worker.includes('rasdial.exe" $name'));
     assert(!worker.includes('rasdial.exe" $name $'));
     const native = fs.readFileSync(path.join(root, 'nsis/Ikev2Credentials.cs'), 'utf8');

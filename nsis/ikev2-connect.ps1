@@ -1,11 +1,13 @@
 # Credentials arrive over the parent's stdin pipe, never argv or a disk file.
 param([switch]$PrepareOnly)
 $ErrorActionPreference = 'Stop'
-$stage = 'initialization'
+$stage = 'credential input'
 try {
-    [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
-    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
-    $request = [Console]::In.ReadToEnd() | ConvertFrom-Json
+    # Do not change Console.InputEncoding: Windows may reject that operation
+    # when no console is attached. Read the private UTF-8 pipe explicitly.
+    $reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), (New-Object System.Text.UTF8Encoding($false)))
+    $request = $reader.ReadToEnd() | ConvertFrom-Json
+    $stage = 'request validation'
     $name = [string]$request.name
     if ($name -ne 'VPNUK-IKEv2' -and $name -notmatch '^VPNUK-EAP-Test-[a-f0-9]+$') {
         throw 'Unexpected connection name'
@@ -36,7 +38,7 @@ try {
     while ($inner.InnerException) { $inner = $inner.InnerException }
     $code = [regex]::Match($inner.Message, 'Windows code (\d+)').Groups[1].Value
     if ($code) { [Console]::Error.WriteLine("IKEv2 $stage failed (Windows code $code)") }
-    else { [Console]::Error.WriteLine("IKEv2 $stage failed; no credentials were logged") }
+    else { [Console]::Error.WriteLine("IKEv2 $stage failed ($($inner.GetType().Name), HRESULT $($inner.HResult)); no credentials were logged") }
     exit 1
 } finally {
     if ($request) { $request.password = $null }
