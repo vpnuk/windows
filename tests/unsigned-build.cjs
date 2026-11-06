@@ -36,6 +36,9 @@ async function main() {
     assert(workflow.includes("Public releases require an explicitly selected signed build."));
     assert(workflow.includes('Remove-Item ".\\release\\latest.yml"'));
     assert(workflow.includes('--draft'));
+    assert(workflow.includes('$suffix = if ($env:BUILD_SIGNED -eq \'true\') { "" } else { "-unsigned-build${{ github.run_number }}" }'));
+    assert(workflow.includes('$tag   = if ($env:BUILD_SIGNED -eq \'true\') { "v$version" } else { "v$version-build$build" }'));
+    assert(workflow.includes('--notes-file CHANGELOG.md'));
     console.log('PASS workflow isolates paid signing and unsigned drafts');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

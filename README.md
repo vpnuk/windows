@@ -1,24 +1,21 @@
 # VPNUK for Windows
 
-## Version 1.4.0 — Private testing
+## Version 1.4.0
 
-This candidate focuses on correcting Windows IKEv2 username/password
-authentication. OpenVPN and WireGuard connection code is unchanged.
-Testing must be completed before signing or public release.
+This release fixes IKEv2 connections from within the app and improves account
+and server switching, reconnection and connection error reporting.
+
+**[Download the signed Windows release](https://github.com/vpnuk/windows/releases/tag/v1.4.0)**
 
 **[Read the changelog for 1.4.0 and 1.3.9](CHANGELOG.md)**
 
 The installer finish screen also links to an offline copy of this changelog,
 while retaining the Run VPNUK checkbox.
 
-The signed public release below remains 1.3.9 until a new release is approved.
-
-## Version 1.3.9
+## App overview
 
 Manage OpenVPN, WireGuard and IKEv2 connections, select servers and save named
 connection profiles using your VPNUK account.
-
-**[Download the signed Windows release](https://github.com/vpnuk/windows/releases/tag/v1.3.9)**
 
 **[Read the full app overview and version 1.3.9 release notes](RELEASE-1.3.9.md)**
 
@@ -54,11 +51,10 @@ connection profiles using your VPNUK account.
 
 ### Installing and updating
 
-- Existing users can use the in-app updater or install the signed update manually.
-  The owner tested updating from version 1.3.8 to 1.3.9.
-- Choose **VPNUK-Setup-1.3.9-build371.exe** for the full application installer,
+- Users on 1.3.8 and 1.3.9 can use the in-app updater or install the signed update manually.
+- Choose **[VPNUK-Setup-1.4.0.exe](https://github.com/vpnuk/windows/releases/download/v1.4.0/VPNUK-Setup-1.4.0.exe)** for the full application installer,
   including x64, x86 and ARM64 application packages.
-- **VPNUK-Web-Setup-1.3.9-build371.exe** is the smaller x64 web installer and
+- **[VPNUK-Web-Setup-1.4.0.exe](https://github.com/vpnuk/windows/releases/download/v1.4.0/VPNUK-Web-Setup-1.4.0.exe)** is the smaller x64 web installer and
   downloads its application package during installation.
 - Administrator permission is required. Disconnect the VPN before updating.
 - Installing VPN components can require an internet connection and a Windows restart.

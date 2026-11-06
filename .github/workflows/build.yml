@@ -295,7 +295,8 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          $suffix = if ("${{ github.event.inputs.publish }}" -eq "true") { "" } elseif ($env:BUILD_SIGNED -eq 'true') { "-build${{ github.run_number }}" } else { "-unsigned-build${{ github.run_number }}" }
+          # Signed candidates use final names so publication needs no rebuild/signing.
+          $suffix = if ($env:BUILD_SIGNED -eq 'true') { "" } else { "-unsigned-build${{ github.run_number }}" }
           $full = @(Get-ChildItem ".\release\*.exe" |
             Where-Object { $_.Name -notlike "*web*" -and $_.Name -notlike "*nsis-web*" })
           if ($full.Count -ne 1) { throw "Expected exactly one full installer, found $($full.Count)" }
@@ -378,7 +379,7 @@ jobs:
             $draft = $false
           } else {
             # Dev build — rename with build-number suffix, keep as draft.
-            $tag   = "v$version-build$build"
+            $tag   = if ($env:BUILD_SIGNED -eq 'true') { "v$version" } else { "v$version-build$build" }
             $title = "VPNUK $version (build $build)"
             if ($env:BUILD_SIGNED -ne 'true') { $title += ' — UNSIGNED TEST ONLY' }
             $draft = $true
@@ -404,5 +405,5 @@ jobs:
           } else {
             gh release view "$tag" --json tagName 2>$null
             if ($LASTEXITCODE -eq 0) { throw "Release $tag already exists; refusing to replace it automatically." }
-            gh release create "$tag" --title "$title" --notes "VPNUK for Windows v$version" @artifacts
+            gh release create "$tag" --title "$title" --notes-file CHANGELOG.md @artifacts
           }
